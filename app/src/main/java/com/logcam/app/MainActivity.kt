@@ -585,11 +585,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun handleSliderProgress(p: Int) {
-        if ((selected == Sel.ISO || selected == Sel.SS) && autoExp) { seedManual(); autoExp = false; styleAuto(false) }
+        if ((selected == Sel.ISO || selected == Sel.SS) && autoExp) { seedManual(); autoExp = false; styleAuto(false); styleVerticalAuto(false) }
         when (selected) {
             Sel.ISO -> isoProgress = p.coerceIn(0, 100)
             Sel.SS -> shutterIdx = p.coerceIn(0, shutterDen.size - 1)
-            Sel.FOCUS -> { focusProgress = p.coerceIn(0, 100); autoFocus = false; focusX = -1f; clearLock(); styleAuto(false) }
+            Sel.FOCUS -> { focusProgress = p.coerceIn(0, 100); autoFocus = false; focusX = -1f; clearLock(); styleAuto(false); styleVerticalAuto(false) }
             Sel.ZOOM -> { zoom = sliderToZoom(p).coerceIn(zoomMin, uiZoomMax()); startZoomTick() }
             Sel.EV -> evProgress = p.coerceIn(0, 24)
             else -> {}
