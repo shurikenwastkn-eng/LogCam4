@@ -444,13 +444,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun wire() {
-        btnRecord.setOnClickListener { if (recording) stopRecording() else startRecording() }
-        btnLibrary.setOnClickListener { openLibrary() }
+        btnRecord.setOnClickListener { dismissCameraControl(); if (recording) stopRecording() else startRecording() }
+        btnLibrary.setOnClickListener { dismissCameraControl(); openLibrary() }
         btnLibClose.setOnClickListener { if (selClips.isNotEmpty()) clearSelection() else libraryPanel.visibility = View.GONE }
         btnLibShare.setOnClickListener { shareClips(selClips.values.toList()) }
         btnLibExport.setOnClickListener { exportClips(selClips.values.toList()) }
         btnLibDelete.setOnClickListener { confirmDelete(selClips.values.toList()) }
-        btnSetClose.setOnClickListener { settingsPanel.visibility = View.GONE }
+        btnSetClose.setOnClickListener { settingsPanel.visibility = View.GONE; dismissCameraControl() }
         btnVerticalAuto.setOnClickListener { toggleAutoForSelection() }
         verticalSlider.onProgressChanged = { p -> handleSliderProgress(p) }
         wireZoomButton(btnZoomPlus, 1)
