@@ -43,7 +43,8 @@ data class ManualSettings(
     val stab: Int = 1,          // 0 off, 1 OIS, 2 standard (EIS), 3 cinematic (preview stabilization)
     val focusX: Float = -1f,    // tap point, normalised in the raw sensor frame (-1 = none)
     val focusY: Float = -1f,
-    val zoom: Float = 1f
+    val zoom: Float = 1f,
+    val lock: Boolean = false   // AE / AF lock
 )
 
 class CameraController(private val ctx: Context) {
@@ -258,6 +259,9 @@ class CameraController(private val ctx: Context) {
         }
     }
 
+    /** Runs one autofocus scan; with AF mode AUTO the lens then stays where it landed (focus lock). */
+    fun triggerAf() { handler.post { applyRequest(true) } }
+
     fun update(s: ManualSettings) {
         val prevEis = eisFor(settings)
         settings = s
@@ -266,7 +270,7 @@ class CameraController(private val ctx: Context) {
         }
     }
 
-    private fun applyRequest() {
+    private fun applyRequest(trigger: Boolean = false) {
         val dev = device ?: return
         val sess = session ?: return
         val m = mode ?: return
@@ -307,7 +311,8 @@ class CameraController(private val ctx: Context) {
 
             // focus
             if (settings.autoFocus) {
-                b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+                b.set(CaptureRequest.CONTROL_AF_MODE,
+                    if (settings.lock) CaptureRequest.CONTROL_AF_MODE_AUTO else CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
             } else {
                 b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
                 b.set(CaptureRequest.LENS_FOCUS_DISTANCE, settings.focusDiopters)
@@ -315,6 +320,10 @@ class CameraController(private val ctx: Context) {
 
             // white balance
             b.set(CaptureRequest.CONTROL_AWB_MODE, settings.awbMode)
+            if (settings.lock) {
+                if (c.get(CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE) == true) b.set(CaptureRequest.CONTROL_AE_LOCK, true)
+                if (c.get(CameraCharacteristics.CONTROL_AWB_LOCK_AVAILABLE) == true) b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
+            }
 
             val zr = if (Build.VERSION.SDK_INT >= 30) c.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE) else null
             if (zr != null) {
@@ -336,6 +345,12 @@ class CameraController(private val ctx: Context) {
                     b.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(r))
                 if (settings.autoExposure && (c.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0) > 0)
                     b.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(r))
+            }
+
+            if (trigger) {
+                b.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                sess.capture(b.build(), null, handler)
+                return
             }
 
             sess.setRepeatingRequest(b.build(), object : CameraCaptureSession.CaptureCallback() {

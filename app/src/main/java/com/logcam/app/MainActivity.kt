@@ -3,15 +3,22 @@ package com.logcam.app
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.display.DisplayManager
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
@@ -23,7 +30,10 @@ import android.os.SystemClock
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Size
+import android.text.TextUtils
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.Surface
 import android.view.SurfaceHolder
@@ -32,6 +42,7 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.ImageView
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.SeekBar
@@ -39,8 +50,11 @@ import android.widget.TextView
 import android.widget.Toast
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.concurrent.Executors
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.hypot
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.roundToInt
@@ -85,6 +99,31 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var tvLibEmpty: TextView
     private lateinit var btnLibClose: TextView
     private var stateLoaded = false
+
+    private lateinit var levelView: LevelView
+    private lateinit var tvLock: TextView
+    private lateinit var btnSetClose: TextView
+    private lateinit var vGrid: TextView
+    private lateinit var vLevel: TextView
+    private lateinit var libTitle: TextView
+    private lateinit var libActions: View
+    private lateinit var btnLibShare: TextView
+    private lateinit var btnLibExport: TextView
+    private lateinit var btnLibDelete: TextView
+
+    private var focusLocked = false
+    private var gridIdx = 0
+    private val gridNames = listOf("Off", "Rule of thirds", "Thirds + diagonals", "Square grid", "Square grid + diagonals", "Center cross")
+    private var levelOn = false
+
+    private val selClips = LinkedHashMap<Uri, Clip>()
+    private val libSel = HashMap<Uri, View>()
+    private var libClips: List<Clip> = emptyList()
+    private val thumbPool = Executors.newFixedThreadPool(3)
+
+    private lateinit var sensors: SensorManager
+    private val grav = FloatArray(3)
+    private var gravInit = false
 
     private lateinit var guideView: GuideView
     private lateinit var recBorder: View
@@ -218,6 +257,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         super.onResume()
         hideSystemBars()
         refreshLastThumb()
+        registerLevel()
         (getSystemService(DISPLAY_SERVICE) as DisplayManager).registerDisplayListener(displayListener, null)
         hasCamPerm = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         startPipeline()
@@ -225,6 +265,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     override fun onPause() {
         (getSystemService(DISPLAY_SERVICE) as DisplayManager).unregisterDisplayListener(displayListener)
+        sensors.unregisterListener(levelListener); gravInit = false
         stopPipeline()
         super.onPause()
     }
@@ -368,6 +409,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         btnLibrary = findViewById(R.id.btnLibrary); libraryPanel = findViewById(R.id.libraryPanel)
         libraryList = findViewById(R.id.libraryList); tvLibEmpty = findViewById(R.id.tvLibEmpty)
         btnLibClose = findViewById(R.id.btnLibClose)
+        levelView = findViewById(R.id.levelView); tvLock = findViewById(R.id.tvLock)
+        btnSetClose = findViewById(R.id.btnSetClose)
+        vGrid = findViewById(R.id.vGrid); vLevel = findViewById(R.id.vLevel)
+        libTitle = findViewById(R.id.libTitle); libActions = findViewById(R.id.libActions)
+        btnLibShare = findViewById(R.id.btnLibShare); btnLibExport = findViewById(R.id.btnLibExport)
+        btnLibDelete = findViewById(R.id.btnLibDelete)
+        sensors = getSystemService(SENSOR_SERVICE) as SensorManager
         guideView = findViewById(R.id.guideView); recBorder = findViewById(R.id.recBorder)
         zoomChips = findViewById(R.id.zoomChips); vGuide = findViewById(R.id.vGuide); vZoomSpeed = findViewById(R.id.vZoomSpeed)
         btnLibrary.clipToOutline = true
@@ -380,14 +428,20 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun wire() {
         btnRecord.setOnClickListener { if (recording) stopRecording() else startRecording() }
         btnLibrary.setOnClickListener { openLibrary() }
-        btnLibClose.setOnClickListener { libraryPanel.visibility = View.GONE }
+        btnLibClose.setOnClickListener { if (selClips.isNotEmpty()) clearSelection() else libraryPanel.visibility = View.GONE }
+        btnLibShare.setOnClickListener { shareClips(selClips.values.toList()) }
+        btnLibExport.setOnClickListener { exportClips(selClips.values.toList()) }
+        btnLibDelete.setOnClickListener { confirmDelete(selClips.values.toList()) }
+        btnSetClose.setOnClickListener { settingsPanel.visibility = View.GONE }
         btnSettings.setOnClickListener {
             settingsPanel.visibility = if (settingsPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
-        preview.setOnTouchListener { _, e ->
-            if (e.action == MotionEvent.ACTION_UP) onPreviewTap(e.x, e.y)
-            true
-        }
+        // tap = focus here, hold = lock exposure + focus here
+        val gestures = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapUp(e: MotionEvent): Boolean { onPreviewTap(e.x, e.y, false); return true }
+            override fun onLongPress(e: MotionEvent) { onPreviewTap(e.x, e.y, true) }
+        })
+        preview.setOnTouchListener { _, e -> gestures.onTouchEvent(e); true }
 
         // bottom pills
         pillZoom.setOnClickListener { toggleSel(Sel.ZOOM) }
@@ -402,7 +456,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         tvAuto.setOnClickListener {
             when (selected) {
                 Sel.ISO, Sel.SS -> { if (autoExp) seedManual(); autoExp = !autoExp }
-                Sel.FOCUS -> if (minFocus > 0f) { autoFocus = !autoFocus; if (autoFocus) focusX = -1f }
+                Sel.FOCUS -> if (minFocus > 0f) { autoFocus = !autoFocus; if (autoFocus) focusX = -1f; clearLock() }
                 else -> {}
             }
             pushSettings(); refreshSlider(); updateAll()
@@ -415,7 +469,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 when (selected) {
                     Sel.ISO -> isoProgress = p
                     Sel.SS -> shutterIdx = p
-                    Sel.FOCUS -> { focusProgress = p; autoFocus = false; focusX = -1f; styleAuto(false) }
+                    Sel.FOCUS -> { focusProgress = p; autoFocus = false; focusX = -1f; clearLock(); styleAuto(false) }
                     Sel.ZOOM -> { zoom = sliderToZoom(p); startZoomTick() }
                     Sel.EV -> evProgress = p
                     else -> {}
@@ -431,7 +485,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             if (recording) { lockedToast(); return@setOnClickListener }
             if (modes.isNotEmpty()) {
                 modeIdx = (modeIdx + 1) % modes.size
-                focusX = -1f; defaultShutter(); restartPipeline(); updateAll()
+                focusX = -1f; clearLock(); defaultShutter(); restartPipeline(); updateAll()
             }
         }
         findViewById<View>(R.id.rowGamut).setOnClickListener {
@@ -472,6 +526,19 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         findViewById<View>(R.id.rowZoomSpeed).setOnClickListener {
             zoomSpeedIdx = (zoomSpeedIdx + 1) % zoomSpeeds.size; updateAll()
         }
+        findViewById<View>(R.id.rowGrid).setOnClickListener { v ->
+            val pm = PopupMenu(this, v)
+            gridNames.forEachIndexed { i, n -> pm.menu.add(0, i, i, n) }
+            pm.menu.setGroupCheckable(0, true, true)
+            pm.menu.getItem(gridIdx).isChecked = true
+            pm.setOnMenuItemClickListener { item -> gridIdx = item.itemId; updateAll(); true }
+            pm.show()
+        }
+        findViewById<View>(R.id.rowLevel).setOnClickListener {
+            levelOn = !levelOn
+            if (levelOn) registerLevel() else { sensors.unregisterListener(levelListener); gravInit = false; levelView.visibility = View.GONE }
+            updateAll()
+        }
     }
 
     private fun toggleSel(s: Sel) {
@@ -480,8 +547,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     // ------------------------------------------------------------------ tap to focus
-    private fun onPreviewTap(x: Float, y: Float) {
-        if (settingsPanel.visibility == View.VISIBLE) { settingsPanel.visibility = View.GONE; return }
+    private fun onPreviewTap(x: Float, y: Float, lock: Boolean) {
         val g = gl ?: return
         val mode = modes.getOrNull(modeIdx) ?: return
         val vw = preview.width.toFloat(); val vh = preview.height.toFloat()
@@ -503,25 +569,51 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         }
         focusX = rx; focusY = ry
         autoFocus = true
-        showFocusRing(x, y)
-        pushSettings(); updateAll()
+        focusLocked = lock
+        showFocusRing(x, y, lock)
+        if (lock) preview.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        pushSettings()
+        if (lock) camera.triggerAf()
+        updateAll()
         if (selected == Sel.FOCUS) refreshSlider()
     }
 
-    private fun showFocusRing(x: Float, y: Float) {
+    private fun clearLock() {
+        if (!focusLocked) return
+        focusLocked = false
+        focusRing.animate().cancel()
+        focusRing.visibility = View.GONE
+    }
+
+    private fun shape(fill: Int, radiusDp: Float, strokeColor: Int = 0, strokeDp: Float = 0f, oval: Boolean = false): GradientDrawable {
+        val g = GradientDrawable()
+        g.shape = if (oval) GradientDrawable.OVAL else GradientDrawable.RECTANGLE
+        g.setColor(fill)
+        if (!oval) g.cornerRadius = radiusDp * resources.displayMetrics.density
+        if (strokeDp > 0f) g.setStroke((strokeDp * resources.displayMetrics.density).toInt(), strokeColor)
+        return g
+    }
+
+    private fun showFocusRing(x: Float, y: Float, locked: Boolean) {
         val size = if (focusRing.width > 0) focusRing.width else (76 * resources.displayMetrics.density).toInt()
         focusRing.animate().cancel()
+        if (locked) focusRing.background = shape(Color.parseColor("#22FFC23C"), 0f, AMBER, 3f, true)
+        else focusRing.setBackgroundResource(R.drawable.focus_ring)
         focusRing.x = x - size / 2f
         focusRing.y = y - size / 2f
         focusRing.alpha = 1f
         focusRing.scaleX = 1.4f; focusRing.scaleY = 1.4f
         focusRing.visibility = View.VISIBLE
-        focusRing.animate().scaleX(1f).scaleY(1f).setStartDelay(0).setDuration(180).withEndAction {
-            focusRing.animate().alpha(0f).setStartDelay(900).setDuration(300).withEndAction {
-                focusRing.visibility = View.GONE
-                focusRing.alpha = 1f
+        if (locked) {
+            focusRing.animate().scaleX(1f).scaleY(1f).setStartDelay(0).setDuration(180).start()
+        } else {
+            focusRing.animate().scaleX(1f).scaleY(1f).setStartDelay(0).setDuration(180).withEndAction {
+                focusRing.animate().alpha(0f).setStartDelay(900).setDuration(300).withEndAction {
+                    focusRing.visibility = View.GONE
+                    focusRing.alpha = 1f
+                }.start()
             }.start()
-        }.start()
+        }
     }
 
     // ------------------------------------------------------------------ state -> camera
@@ -553,6 +645,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             ?: stabOptions.indexOfFirst { it.first == 1 }.takeIf { it >= 0 } ?: 0
 
         focusX = -1f; focusY = -1f
+        focusLocked = false; focusRing.visibility = View.GONE
         lastIso = 0; lastExpNs = 0L
         val zr = try { camera.zoomRange(lens.id) } catch (t: Throwable) { 1f to 1f }
         zoomMin = zr.first; zoomMax = maxOf(zr.second, zr.first)
@@ -599,7 +692,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             stab = stabOptions.getOrNull(stabIdx)?.first ?: 0,
             focusX = focusX,
             focusY = focusY,
-            zoom = zoomShown
+            zoom = zoomShown,
+            lock = focusLocked && autoFocus
         ))
     }
 
@@ -627,6 +721,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun focusText(): String {
+        if (focusLocked) return "AF LOCK"
         if (autoFocus) return "AF"
         if (focusProgress == 0) return "MF ∞"
         val d = (minFocus * focusProgress / 100f).coerceAtLeast(0.01f)
@@ -639,6 +734,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private fun updatePills() {
         val ev = (evProgress - 12) / 4f
+        tvLock.visibility = if (focusLocked) View.VISIBLE else View.GONE
         pillZoom.text = fmtX(curLensFactor * zoomShown)
         pillIso.text = "ISO ${shownIso()}"
         pillShutter.text = "1/${shownDen()}"
@@ -650,7 +746,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         stylePill(pillIso, selected == Sel.ISO, !autoExp)
         stylePill(pillShutter, selected == Sel.SS, !autoExp)
         stylePill(pillWb, false, wbIdx != 0)
-        stylePill(pillFocus, selected == Sel.FOCUS, !autoFocus)
+        stylePill(pillFocus, selected == Sel.FOCUS, !autoFocus || focusLocked)
         stylePill(pillEv, selected == Sel.EV, evProgress != 12)
     }
 
@@ -664,6 +760,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vRot.text = "${manualFor(displayRotationDeg()) * 90}°"
         vGuide.text = guides[guideIdx].first
         vZoomSpeed.text = zoomSpeedNames[zoomSpeedIdx]
+        vGrid.text = gridNames[gridIdx]
+        vLevel.text = if (levelOn) "On" else "Off"
     }
 
     private fun refreshSlider() {
@@ -804,6 +902,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         val aspect = if (m != null) m.w.toFloat() / m.h else 16f / 9f
         val g = guides[guideIdx]
         guideView.setGuide(g.second, aspect, if (g.second > 0f) g.first else "")
+        guideView.setGrid(gridIdx)
     }
 
     // ------------------------------------------------------------------ saved settings
@@ -814,6 +913,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         assistPref = prefs.getBoolean("assist", false)
         guideIdx = prefs.getInt("guide", 0).coerceIn(0, guides.size - 1)
         zoomSpeedIdx = prefs.getInt("zoomSpeed", 1).coerceIn(0, zoomSpeeds.size - 1)
+        gridIdx = prefs.getInt("grid", 0).coerceIn(0, gridNames.size - 1)
+        levelOn = prefs.getBoolean("level", false)
     }
 
     private fun loadValues() {
@@ -837,6 +938,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             .putBoolean("assist", assistPref)
             .putInt("guide", guideIdx)
             .putInt("zoomSpeed", zoomSpeedIdx)
+            .putInt("grid", gridIdx)
+            .putBoolean("level", levelOn)
             .putBoolean("autoExp", autoExp)
             .putBoolean("autoFocus", autoFocus)
             .putInt("iso", isoProgress)
@@ -844,6 +947,33 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             .putInt("focus", focusProgress)
             .putInt("ev", evProgress)
             .apply()
+    }
+
+    // ------------------------------------------------------------------ level
+    private val levelListener = object : SensorEventListener {
+        override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+        override fun onSensorChanged(e: SensorEvent) {
+            if (!gravInit) { for (k in 0..2) grav[k] = e.values[k]; gravInit = true }
+            else for (k in 0..2) grav[k] += 0.15f * (e.values[k] - grav[k])
+            val x = grav[0]; val y = grav[1]
+            // device axes -> screen axes (sx right, sy up) for the current display rotation
+            val sx: Float; val sy: Float
+            when (displayRotationDeg()) {
+                90 -> { sx = -y; sy = x }
+                180 -> { sx = -x; sy = -y }
+                270 -> { sx = y; sy = -x }
+                else -> { sx = x; sy = y }
+            }
+            val ang = Math.toDegrees(atan2(sx.toDouble(), sy.toDouble())).toFloat()
+            levelView.set(ang, hypot(sx, sy) > 3f)
+        }
+    }
+
+    private fun registerLevel() {
+        if (!levelOn) { levelView.visibility = View.GONE; return }
+        levelView.visibility = View.VISIBLE
+        val s = sensors.getDefaultSensor(Sensor.TYPE_GRAVITY) ?: sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        if (s != null) sensors.registerListener(levelListener, s, SensorManager.SENSOR_DELAY_GAME)
     }
 
     // ------------------------------------------------------------------ recordings library
@@ -862,12 +992,16 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun showLibrary() {
         settingsPanel.visibility = View.GONE
         libraryPanel.visibility = View.VISIBLE
+        selClips.clear(); libSel.clear()
         libraryList.removeAllViews()
+        updateLibHeader()
         Thread {
             val clips = try { queryClips() } catch (t: Throwable) { emptyList() }
             runOnUiThread {
+                libClips = clips
                 tvLibEmpty.visibility = if (clips.isEmpty()) View.VISIBLE else View.GONE
-                for (c in clips) libraryList.addView(buildRow(c))
+                buildGrid(clips)
+                updateLibHeader()
             }
         }.start()
     }
@@ -895,38 +1029,122 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         return out
     }
 
-    private fun buildRow(c: Clip): View {
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER_VERTICAL
-        row.setPadding(dp(28), dp(8), dp(28), dp(8))
-        row.isClickable = true
+    private fun buildGrid(clips: List<Clip>) {
+        libraryList.removeAllViews()
+        libSel.clear()
+        val cols = 3
+        val side = dp(28)
+        val gap = dp(12)
+        val cardW = (resources.displayMetrics.widthPixels - 2 * side - (cols - 1) * gap) / cols
+        var row: LinearLayout? = null
+        for ((i, c) in clips.withIndex()) {
+            if (i % cols == 0) {
+                row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                row.setPadding(side, 0, side, dp(14))
+                libraryList.addView(row)
+            }
+            row?.addView(buildCard(c, cardW, gap))
+        }
+    }
+
+    private fun buildCard(c: Clip, w: Int, gap: Int): View {
+        val card = LinearLayout(this)
+        card.orientation = LinearLayout.VERTICAL
+        val lp = LinearLayout.LayoutParams(w, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.marginEnd = gap
+        card.layoutParams = lp
+
+        val thumb = FrameLayout(this)
+        thumb.layoutParams = LinearLayout.LayoutParams(w, w * 9 / 16)
+        thumb.background = shape(Color.parseColor("#26FFFFFF"), 12f)
+        thumb.clipToOutline = true
 
         val iv = ImageView(this)
-        iv.layoutParams = LinearLayout.LayoutParams(dp(128), dp(72))
         iv.scaleType = ImageView.ScaleType.CENTER_CROP
-        iv.setBackgroundColor(Color.parseColor("#22FFFFFF"))
+        thumb.addView(iv, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
-        val tv = TextView(this)
-        tv.setTextColor(Color.WHITE)
-        tv.textSize = 13f
-        tv.setPadding(dp(16), 0, 0, 0)
-        val dur = c.durMs / 1000
-        tv.text = c.name + "\n" +
-            SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(c.dateMs)) +
-            "  ·  " + String.format(Locale.US, "%d:%02d", dur / 60, dur % 60) +
-            "  ·  " + String.format(Locale.US, "%.0f MB", c.size / 1048576.0) + "\n" + c.path
+        val secs = c.durMs / 1000
+        val dur = TextView(this)
+        dur.text = String.format(Locale.US, "%d:%02d", secs / 60, secs % 60)
+        dur.setTextColor(Color.WHITE)
+        dur.textSize = 11f
+        dur.background = shape(Color.parseColor("#A6000000"), 6f)
+        dur.setPadding(dp(6), dp(2), dp(6), dp(2))
+        val dlp = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END)
+        dlp.setMargins(0, 0, dp(6), dp(6))
+        thumb.addView(dur, dlp)
 
-        row.addView(iv)
-        row.addView(tv)
-        row.setOnClickListener { openClip(c.uri) }
-        row.setOnLongClickListener { confirmDelete(c); true }
+        val share = ImageView(this)
+        share.setImageResource(R.drawable.ic_share)
+        share.setBackgroundResource(R.drawable.bg_pill_round)
+        share.setPadding(dp(7), dp(7), dp(7), dp(7))
+        share.setOnClickListener { shareClips(listOf(c)) }
+        val slp = FrameLayout.LayoutParams(dp(32), dp(32), Gravity.TOP or Gravity.END)
+        slp.setMargins(0, dp(6), dp(6), 0)
 
-        Thread {
-            val bmp = try { contentResolver.loadThumbnail(c.uri, Size(320, 180), null) } catch (t: Throwable) { null }
+        val sel = FrameLayout(this)
+        sel.background = shape(Color.parseColor("#33FFC23C"), 12f, AMBER, 3f)
+        val chk = TextView(this)
+        chk.text = "✓"
+        chk.setTextColor(Color.BLACK)
+        chk.textSize = 13f
+        chk.gravity = Gravity.CENTER
+        chk.background = shape(AMBER, 0f, 0, 0f, true)
+        val clp = FrameLayout.LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.START)
+        clp.setMargins(dp(8), dp(8), 0, 0)
+        sel.addView(chk, clp)
+        sel.visibility = if (selClips.containsKey(c.uri)) View.VISIBLE else View.GONE
+        libSel[c.uri] = sel
+
+        thumb.addView(share, slp)
+        thumb.addView(sel, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+
+        val name = TextView(this)
+        name.text = c.name.removeSuffix(".mp4")
+        name.setTextColor(Color.WHITE)
+        name.textSize = 12f
+        name.isSingleLine = true
+        name.ellipsize = TextUtils.TruncateAt.END
+        name.setPadding(dp(2), dp(7), 0, 0)
+
+        val meta = TextView(this)
+        meta.text = SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(c.dateMs)) +
+            "  ·  " + String.format(Locale.US, "%.0f MB", c.size / 1048576.0)
+        meta.setTextColor(Color.parseColor("#99FFFFFF"))
+        meta.textSize = 10f
+        meta.setPadding(dp(2), dp(1), 0, 0)
+
+        card.addView(thumb)
+        card.addView(name)
+        card.addView(meta)
+        card.setOnClickListener { if (selClips.isNotEmpty()) toggleSelect(c) else openClip(c.uri) }
+        card.setOnLongClickListener { toggleSelect(c); true }
+
+        thumbPool.execute {
+            val bmp = try { contentResolver.loadThumbnail(c.uri, Size(480, 270), null) } catch (t: Throwable) { null }
             if (bmp != null) runOnUiThread { iv.setImageBitmap(bmp) }
-        }.start()
-        return row
+        }
+        return card
+    }
+
+    private fun toggleSelect(c: Clip) {
+        if (selClips.containsKey(c.uri)) selClips.remove(c.uri) else selClips[c.uri] = c
+        libSel[c.uri]?.visibility = if (selClips.containsKey(c.uri)) View.VISIBLE else View.GONE
+        updateLibHeader()
+    }
+
+    private fun clearSelection() {
+        selClips.clear()
+        for (v in libSel.values) v.visibility = View.GONE
+        updateLibHeader()
+    }
+
+    private fun updateLibHeader() {
+        libTitle.text = if (selClips.isEmpty()) "Recordings" + (if (libClips.isNotEmpty()) "  ·  ${libClips.size}" else "")
+        else "${selClips.size} selected"
+        libActions.visibility = if (selClips.isEmpty()) View.GONE else View.VISIBLE
+        btnLibClose.text = if (selClips.isEmpty()) "Close" else "Cancel"
     }
 
     private fun openClip(uri: Uri) {
@@ -937,18 +1155,68 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         catch (t: Throwable) { Toast.makeText(this, "No app found to play this video", Toast.LENGTH_SHORT).show() }
     }
 
-    private fun confirmDelete(c: Clip) {
+    private fun shareClips(list: List<Clip>) {
+        if (list.isEmpty()) return
+        val i: Intent
+        if (list.size == 1) {
+            i = Intent(Intent.ACTION_SEND)
+            i.type = "video/mp4"
+            i.putExtra(Intent.EXTRA_STREAM, list[0].uri)
+            i.clipData = ClipData.newRawUri("video", list[0].uri)
+        } else {
+            i = Intent(Intent.ACTION_SEND_MULTIPLE)
+            i.type = "video/*"
+            val uris = ArrayList<Uri>(list.map { it.uri })
+            i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            val cd = ClipData.newRawUri("video", uris[0])
+            for (k in 1 until uris.size) cd.addItem(ClipData.Item(uris[k]))
+            i.clipData = cd
+        }
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try { startActivity(Intent.createChooser(i, "Share")) }
+        catch (t: Throwable) { Toast.makeText(this, "Can't share this", Toast.LENGTH_SHORT).show() }
+    }
+
+    /** Copies the chosen clips to Downloads/LogCam so they are easy to find in any file manager. */
+    private fun exportClips(list: List<Clip>) {
+        if (list.isEmpty()) return
+        Toast.makeText(this, "Exporting ${list.size}...", Toast.LENGTH_SHORT).show()
+        Thread {
+            var ok = 0
+            for (c in list) {
+                try {
+                    val v = ContentValues()
+                    v.put(MediaStore.Downloads.DISPLAY_NAME, c.name)
+                    v.put(MediaStore.Downloads.MIME_TYPE, "video/mp4")
+                    v.put(MediaStore.Downloads.RELATIVE_PATH, "Download/LogCam")
+                    v.put(MediaStore.Downloads.IS_PENDING, 1)
+                    val dst = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v) ?: continue
+                    contentResolver.openInputStream(c.uri)?.use { input ->
+                        contentResolver.openOutputStream(dst)?.use { out -> input.copyTo(out) }
+                    }
+                    val done = ContentValues()
+                    done.put(MediaStore.Downloads.IS_PENDING, 0)
+                    contentResolver.update(dst, done, null, null)
+                    ok++
+                } catch (t: Throwable) { /* skip this one */ }
+            }
+            runOnUiThread { Toast.makeText(this, "Exported $ok of ${list.size} to Downloads/LogCam", Toast.LENGTH_LONG).show() }
+        }.start()
+    }
+
+    private fun confirmDelete(list: List<Clip>) {
+        if (list.isEmpty()) return
         AlertDialog.Builder(this)
-            .setTitle("Delete recording?")
-            .setMessage(c.name)
+            .setTitle(if (list.size == 1) "Delete recording?" else "Delete ${list.size} recordings?")
+            .setMessage(if (list.size == 1) list[0].name else "This can't be undone.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ ->
-                try {
-                    contentResolver.delete(c.uri, null, null)
-                    showLibrary(); refreshLastThumb()
-                } catch (t: Throwable) {
-                    Toast.makeText(this, "Can't delete this one here - delete it from your Gallery", Toast.LENGTH_LONG).show()
+                var failed = 0
+                for (c in list) {
+                    try { contentResolver.delete(c.uri, null, null) } catch (t: Throwable) { failed++ }
                 }
+                if (failed > 0) Toast.makeText(this, "$failed couldn't be deleted here - delete them from your Gallery", Toast.LENGTH_LONG).show()
+                showLibrary(); refreshLastThumb()
             }
             .show()
     }
@@ -973,8 +1241,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     override fun onBackPressed() {
         when {
-            libraryPanel.visibility == View.VISIBLE -> libraryPanel.visibility = View.GONE
             settingsPanel.visibility == View.VISIBLE -> settingsPanel.visibility = View.GONE
+            libraryPanel.visibility == View.VISIBLE -> if (selClips.isNotEmpty()) clearSelection() else libraryPanel.visibility = View.GONE
             else -> super.onBackPressed()
         }
     }
