@@ -456,19 +456,28 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         wireZoomButton(btnZoomPlus, 1)
         wireZoomButton(btnZoomMinus, -1)
         btnSettings.setOnClickListener {
-            settingsPanel.visibility = if (settingsPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            val show = settingsPanel.visibility != View.VISIBLE
+            settingsPanel.visibility = if (show) View.VISIBLE else View.GONE
+            if (show) dismissCameraControl()
         }
         // tap = focus here, hold = lock exposure + focus here
         val gestures = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapUp(e: MotionEvent): Boolean { onPreviewTap(e.x, e.y, false); return true }
             override fun onLongPress(e: MotionEvent) { onPreviewTap(e.x, e.y, true) }
         })
-        preview.setOnTouchListener { _, e -> gestures.onTouchEvent(e); true }
+        preview.setOnTouchListener { _, e ->
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) dismissCameraControl()
+            gestures.onTouchEvent(e)
+            true
+        }
 
         // bottom pills
         pillZoom.setOnClickListener { toggleSel(Sel.ZOOM) }
         pillWb.setOnClickListener {
             if (wbModes.isNotEmpty()) {
+                dismissCameraControl()
+                settingsPanel.visibility = View.GONE
+                libraryPanel.visibility = View.GONE
                 val pm = PopupMenu(this, pillWb)
                 wbModes.forEachIndexed { i, mode -> pm.menu.add(0, i, i, mode.second) }
                 pm.menu.setGroupCheckable(0, true, true)
@@ -552,8 +561,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun toggleSel(s: Sel) {
+        settingsPanel.visibility = View.GONE
+        libraryPanel.visibility = View.GONE
         selected = if (selected == s) Sel.NONE else s
         refreshSlider(); updateAll()
+    }
+
+    private fun dismissCameraControl() {
+        selected = Sel.NONE
+        zoomButtonDirection = 0
+        ui.removeCallbacks(zoomButtonRunnable)
+        refreshSlider()
+        updatePills()
     }
 
     private fun toggleAutoForSelection() {
@@ -593,7 +612,6 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                     zoomButtonDirection = 0
                     ui.removeCallbacks(zoomButtonRunnable)
                     v.isPressed = false
-                    v.performClick()
                     true
                 }
                 else -> true
@@ -822,37 +840,54 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun refreshSlider() {
-        if (selected == Sel.NONE) {
-            sliderBar.visibility = View.GONE
-            verticalControlPanel.visibility = View.GONE
-            return
+        val visible = selected != Sel.NONE
+        sliderBar.visibility = View.GONE
+        verticalControlPanel.visibility = if (visible) View.VISIBLE else View.GONE
+        if (!visible) return
+        tvVerticalTitle.text = when (selected) {
+            Sel.ISO -> "ISO"
+            Sel.SS -> "SHUTTER"
+            Sel.FOCUS -> "FOCUS"
+            Sel.ZOOM -> "ZOOM"
+            Sel.EV -> "EXPOSURE"
+            else -> ""
         }
-        val vertical = selected == Sel.ISO || selected == Sel.ZOOM
-        sliderBar.visibility = if (vertical) View.GONE else View.VISIBLE
-        verticalControlPanel.visibility = if (vertical) View.VISIBLE else View.GONE
-        tvVerticalTitle.text = if (selected == Sel.ISO) "ISO" else "ZOOM"
-        btnVerticalAuto.visibility = if (selected == Sel.ISO) View.VISIBLE else View.GONE
+        val autoSupported = selected == Sel.ISO || selected == Sel.SS || selected == Sel.FOCUS
+        btnVerticalAuto.visibility = if (autoSupported) View.VISIBLE else View.GONE
+        btnVerticalAuto.text = if (selected == Sel.FOCUS) "AF" else "AUTO"
         btnZoomPlus.visibility = if (selected == Sel.ZOOM) View.VISIBLE else View.GONE
         btnZoomMinus.visibility = if (selected == Sel.ZOOM) View.VISIBLE else View.GONE
-        tvAuto.visibility = View.VISIBLE
+        tvAuto.visibility = View.GONE
         when (selected) {
-            Sel.ISO -> { sbMain.max = 100; sbMain.progress = isoProgress; tvAuto.text = "AUTO"; styleAuto(autoExp) }
-            Sel.SS -> { sbMain.max = shutterDen.size - 1; sbMain.progress = shutterIdx; tvAuto.text = "AUTO"; styleAuto(autoExp) }
-            Sel.FOCUS -> { sbMain.max = 100; sbMain.progress = focusProgress; tvAuto.text = "AF"; styleAuto(autoFocus) }
-            Sel.ZOOM -> { sbMain.max = 1000; sbMain.progress = zoomToSlider(zoom); tvAuto.visibility = View.GONE }
-            Sel.EV -> { sbMain.max = 24; sbMain.progress = evProgress; tvAuto.visibility = View.GONE }
+            Sel.ISO -> { sbMain.max = 100; sbMain.progress = isoProgress; styleVerticalAuto(autoExp) }
+            Sel.SS -> { sbMain.max = shutterDen.size - 1; sbMain.progress = shutterIdx; styleVerticalAuto(autoExp) }
+            Sel.FOCUS -> { sbMain.max = 100; sbMain.progress = focusProgress; styleVerticalAuto(autoFocus) }
+            Sel.ZOOM -> { sbMain.max = 1000; sbMain.progress = zoomToSlider(zoom) }
+            Sel.EV -> { sbMain.max = 24; sbMain.progress = evProgress }
             else -> {}
         }
         updateSliderLabel()
         updateVerticalSlider()
     }
 
+    private fun styleVerticalAuto(on: Boolean) {
+        btnVerticalAuto.setBackgroundResource(if (on) R.drawable.bg_pill_selected else R.drawable.bg_pill)
+        btnVerticalAuto.setTextColor(if (on) Color.BLACK else Color.WHITE)
+        btnVerticalAuto.isSelected = on
+        btnVerticalAuto.alpha = if (on) 1f else 0.72f
+    }
+
     private fun updateVerticalSlider() {
-        if (!::verticalSlider.isInitialized || (selected != Sel.ISO && selected != Sel.ZOOM)) return
-        if (selected == Sel.ISO) {
-            verticalSlider.configure(100, isoProgress) { p -> "ISO ${isoValueAt(p)}" }
-        } else {
-            verticalSlider.configure(1000, zoomToSlider(zoom)) { p -> fmtX(curLensFactor * sliderToZoom(p)) }
+        if (!::verticalSlider.isInitialized || selected == Sel.NONE) return
+        when (selected) {
+            Sel.ISO -> verticalSlider.configure(100, isoProgress) { p -> "ISO " + isoValueAt(p) }
+            Sel.SS -> verticalSlider.configure(shutterDen.size - 1, shutterIdx) { p -> "1/" + shutterDen[p.coerceIn(0, shutterDen.lastIndex)] }
+            Sel.FOCUS -> verticalSlider.configure(100, focusProgress) { p ->
+                if (p == 0) "∞" else String.format(Locale.US, "%.1fm", 1f / (minFocus * p / 100f).coerceAtLeast(0.01f))
+            }
+            Sel.ZOOM -> verticalSlider.configure(1000, zoomToSlider(zoom)) { p -> fmtX(curLensFactor * sliderToZoom(p)) }
+            Sel.EV -> verticalSlider.configure(24, evProgress) { p -> String.format(Locale.US, "%+.1f", (p - 12) / 4f) }
+            else -> {}
         }
     }
 
@@ -897,13 +932,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 if (abs(diff) < 0.003f) {
                     zoomShown = tgt
                 } else {
-                    val maxStep = speed * 0.033f
-                    val step = (diff * 0.2f).coerceIn(-maxStep, maxStep)
+                    val maxStep = speed * 0.016f
+                    val step = (diff * 0.14f).coerceIn(-maxStep, maxStep)
                     zoomShown *= exp(step)
                 }
             }
             pushSettings(); updatePills(); updateSliderLabel(); updateChips()
-            if (abs(ln(tgt / zoomShown)) > 1e-4f) ui.postDelayed(this, 33)
+            if (abs(ln(tgt / zoomShown)) > 1e-4f) ui.postDelayed(this, 16)
         }
     }
 
@@ -914,12 +949,12 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             val direction = zoomButtonDirection
             if (direction == 0 || selected != Sel.ZOOM) return
             val limit = uiZoomMax()
-            val next = (zoom * exp(direction * 0.045f)).coerceIn(zoomMin, limit)
+            val next = (zoom * exp(direction * 0.008f)).coerceIn(zoomMin, limit)
             zoom = next
             startZoomTick()
             updatePills(); updateSliderLabel(); updateVerticalSlider(); updateChips()
             val atLimit = (direction > 0 && zoom >= limit - 0.001f) || (direction < 0 && zoom <= zoomMin + 0.001f)
-            if (!atLimit && zoomButtonDirection != 0) ui.postDelayed(this, 35)
+            if (!atLimit && zoomButtonDirection != 0) ui.postDelayed(this, 32)
         }
     }
 
@@ -1137,6 +1172,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private fun showLibrary() {
         settingsPanel.visibility = View.GONE
+        dismissCameraControl()
         libraryPanel.visibility = View.VISIBLE
         selClips.clear(); libSel.clear()
         libraryList.removeAllViews()
