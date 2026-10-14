@@ -3,6 +3,8 @@ name: Build APK and publish latest version
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -29,7 +31,9 @@ jobs:
           gradle-version: "8.7"
 
       - name: Build versioned APK
-        run: gradle --no-daemon assembleDebug -PappVersionName="$APP_VERSION" -PappVersionCode="${{ github.run_number }}"
+        run: |
+          VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
+          gradle --no-daemon assembleDebug -PappVersionName="$APP_VERSION" -PappVersionCode="$VERSION_CODE"
 
       - name: Prepare APK
         shell: bash
