@@ -9,6 +9,18 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <com.logcam.app.GuideView
+        android:id="@+id/guideView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <View
+        android:id="@+id/recBorder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/rec_border"
+        android:visibility="gone" />
+
     <View
         android:id="@+id/focusRing"
         android:layout_width="76dp"
@@ -120,11 +132,19 @@
         </LinearLayout>
 
         <LinearLayout
+            android:id="@+id/zoomChips"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:gravity="center"
+            android:orientation="horizontal" />
+
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="horizontal">
 
-            <TextView android:id="@+id/pillLens" style="@style/pill" />
+            <TextView android:id="@+id/pillZoom" style="@style/pill" />
             <TextView android:id="@+id/pillIso" style="@style/pill" />
             <TextView android:id="@+id/pillShutter" style="@style/pill" />
             <TextView android:id="@+id/pillWb" style="@style/pill" />
@@ -179,6 +199,14 @@
             <LinearLayout android:id="@+id/rowRot" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Fix orientation" />
                 <TextView android:id="@+id/vRot" style="@style/rowValue" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/rowGuide" style="@style/row">
+                <TextView style="@style/rowLabel" android:text="Frame guide" />
+                <TextView android:id="@+id/vGuide" style="@style/rowValue" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/rowZoomSpeed" style="@style/row">
+                <TextView style="@style/rowLabel" android:text="Zoom speed" />
+                <TextView android:id="@+id/vZoomSpeed" style="@style/rowValue" />
             </LinearLayout>
         </LinearLayout>
     </ScrollView>
