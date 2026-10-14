@@ -1070,7 +1070,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     // ------------------------------------------------------------------ recordings library
     private fun checkForUpdates() {
         val now = SystemClock.elapsedRealtime()
-        if (updateCheckInFlight || now - lastUpdateCheckAt < 5 * 60 * 1000L) return
+        if (updateCheckInFlight || (lastUpdateCheckAt != 0L && now - lastUpdateCheckAt < 5 * 60 * 1000L)) return
         lastUpdateCheckAt = now
         updateCheckInFlight = true
         Thread {
