@@ -1088,7 +1088,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 val tag = json.optString("tag_name", "")
                 val remoteVersion = tag.removePrefix("v")
                 val releaseUrl = json.optString("html_url", "https://github.com/shurikenwastkn-eng/LogCam4/releases")
-                if (tag.isBlank() || !isVersionNewer(remoteVersion, BuildConfig.VERSION_NAME)) return@Thread
+                if (tag.isBlank() || !isVersionNewer(remoteVersion, (packageManager.getPackageInfo(packageName, 0).versionName ?: "0.1"))) return@Thread
                 runOnUiThread {
                     val lastPrompted = prefs.getString("lastUpdatePrompted", "")
                     if (lastPrompted == tag || isFinishing || isDestroyed) return@runOnUiThread
