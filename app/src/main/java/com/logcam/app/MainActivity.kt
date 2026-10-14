@@ -932,13 +932,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 if (abs(diff) < 0.003f) {
                     zoomShown = tgt
                 } else {
-                    val maxStep = speed * 0.016f
-                    val step = (diff * 0.14f).coerceIn(-maxStep, maxStep)
+                    val maxStep = speed * 0.033f
+                    val step = (diff * 0.12f).coerceIn(-maxStep, maxStep)
                     zoomShown *= exp(step)
                 }
             }
             pushSettings(); updatePills(); updateSliderLabel(); updateChips()
-            if (abs(ln(tgt / zoomShown)) > 1e-4f) ui.postDelayed(this, 16)
+            if (abs(ln(tgt / zoomShown)) > 1e-4f) ui.postDelayed(this, 33)
         }
     }
 
