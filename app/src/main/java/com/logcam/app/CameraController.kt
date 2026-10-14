@@ -42,7 +42,8 @@ data class ManualSettings(
     val awbMode: Int = CaptureRequest.CONTROL_AWB_MODE_AUTO,
     val stab: Int = 1,          // 0 off, 1 OIS, 2 standard (EIS), 3 cinematic (preview stabilization)
     val focusX: Float = -1f,    // tap point, normalised in the raw sensor frame (-1 = none)
-    val focusY: Float = -1f
+    val focusY: Float = -1f,
+    val zoom: Float = 1f
 )
 
 class CameraController(private val ctx: Context) {
@@ -150,6 +151,35 @@ class CameraController(private val ctx: Context) {
 
     private var currentHlg = false
 
+    fun zoomRange(id: String): Pair<Float, Float> {
+        val c = manager.getCameraCharacteristics(id)
+        if (Build.VERSION.SDK_INT >= 30) {
+            val r = c.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+            if (r != null) return r.lower to r.upper
+        }
+        return 1f to (c.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f)
+    }
+
+    /** 35mm-equivalent focal length, used to work out each lens's optical zoom level. */
+    fun focalEq(id: String): Float? {
+        val c = manager.getCameraCharacteristics(id)
+        val f = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: return null
+        val ps = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return null
+        return f * 43.27f / hypot(ps.width, ps.height)
+    }
+
+    /** For a logical multi-camera: zoom ratios at which each physical lens takes over. */
+    fun physicalFactors(id: String): List<Float> {
+        val c = manager.getCameraCharacteristics(id)
+        val ref = focalEq(id) ?: return emptyList()
+        val out = ArrayList<Float>()
+        for (pid in c.physicalCameraIds) {
+            val e = try { focalEq(pid) } catch (t: Throwable) { null } ?: continue
+            out.add(e / ref)
+        }
+        return out
+    }
+
     fun stabOptions(id: String): List<Pair<Int, String>> {
         val c = manager.getCameraCharacteristics(id)
         val out = ArrayList<Pair<Int, String>>()
@@ -180,8 +210,11 @@ class CameraController(private val ctx: Context) {
         if (ch > a.height()) { ch = a.height(); cw = (ch * aspect).toInt() }
         val left = a.left + (a.width() - cw) / 2
         val top = a.top + (a.height() - ch) / 2
-        val cx = left + (fx * cw).toInt()
-        val cy = top + (fy * ch).toInt()
+        val z = settings.zoom.coerceAtLeast(1f)
+        val zx = 0.5f + (fx - 0.5f) / z
+        val zy = 0.5f + (fy - 0.5f) / z
+        val cx = left + (zx * cw).toInt()
+        val cy = top + (zy * ch).toInt()
         val half = (ch * 0.08f).toInt().coerceAtLeast(16)
         val x0 = (cx - half).coerceIn(a.left, a.right - 2 * half - 1)
         val y0 = (cy - half).coerceIn(a.top, a.bottom - 2 * half - 1)
@@ -282,6 +315,20 @@ class CameraController(private val ctx: Context) {
 
             // white balance
             b.set(CaptureRequest.CONTROL_AWB_MODE, settings.awbMode)
+
+            val zr = if (Build.VERSION.SDK_INT >= 30) c.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE) else null
+            if (zr != null) {
+                b.set(CaptureRequest.CONTROL_ZOOM_RATIO, settings.zoom.coerceIn(zr.lower, zr.upper))
+            } else if (settings.zoom > 1.01f) {
+                val a = c.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                if (a != null) {
+                    val w = (a.width() / settings.zoom).toInt()
+                    val h = (a.height() / settings.zoom).toInt()
+                    val x = a.left + (a.width() - w) / 2
+                    val y = a.top + (a.height() - h) / 2
+                    b.set(CaptureRequest.SCALER_CROP_REGION, Rect(x, y, x + w, y + h))
+                }
+            }
 
             if (settings.focusX >= 0f && settings.focusY >= 0f) {
                 val r = meteringRect(c, m, settings.focusX, settings.focusY)
