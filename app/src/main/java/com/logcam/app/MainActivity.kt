@@ -33,6 +33,7 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -46,7 +47,7 @@ import kotlin.math.roundToInt
 
 class MainActivity : Activity(), SurfaceHolder.Callback {
 
-    private enum class Sel { NONE, ISO, SS, FOCUS, EV }
+    private enum class Sel { NONE, ISO, SS, FOCUS, EV, ZOOM }
 
     private lateinit var camera: CameraController
     private lateinit var prefs: SharedPreferences
@@ -64,7 +65,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var sbMain: SeekBar
     private lateinit var tvAuto: TextView
     private lateinit var tvSlider: TextView
-    private lateinit var pillLens: TextView
+    private lateinit var pillZoom: TextView
     private lateinit var pillIso: TextView
     private lateinit var pillShutter: TextView
     private lateinit var pillWb: TextView
@@ -84,6 +85,37 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var tvLibEmpty: TextView
     private lateinit var btnLibClose: TextView
     private var stateLoaded = false
+
+    private lateinit var guideView: GuideView
+    private lateinit var recBorder: View
+    private lateinit var zoomChips: LinearLayout
+    private lateinit var vGuide: TextView
+    private lateinit var vZoomSpeed: TextView
+
+    private class Chip(val factor: Float, val lensIdx: Int, val zoom: Float)
+    private var chips: List<Chip> = emptyList()
+    private val chipViews = ArrayList<TextView>()
+    private var zoomMin = 1f
+    private var zoomMax = 1f
+    private var zoom = 1f
+    private var zoomShown = 1f
+    private var curLensFactor = 1f
+    private var zoomSpeedIdx = 1
+    private val zoomSpeeds = floatArrayOf(0.25f, 0.6f, 1.5f, 0f)
+    private val zoomSpeedNames = arrayOf("Slow", "Medium", "Fast", "Instant")
+
+    private var guideIdx = 0
+    private val guides = listOf(
+        "Off" to 0f,
+        "IMAX 1.43:1" to 1.43f,
+        "IMAX Digital 1.90:1" to 1.90f,
+        "Cinema Flat 1.85:1" to 1.85f,
+        "Univisium 2:1" to 2.0f,
+        "Cinema Scope 2.39:1" to 2.39f,
+        "Ultra Panavision 2.76:1" to 2.76f,
+        "4:3" to (4f / 3f),
+        "1:1" to 1f
+    )
 
     private class Clip(val uri: Uri, val name: String, val dateMs: Long, val size: Long, val durMs: Long, val path: String)
 
@@ -285,6 +317,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             recStartMs = SystemClock.elapsedRealtime()
             btnRecord.setImageResource(R.drawable.rec_active)
             tvTimer.visibility = View.VISIBLE
+            recBorder.visibility = View.VISIBLE
             ui.post(timerRunnable)
             updateAll()
         }
@@ -296,6 +329,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         recording = false
         ui.removeCallbacks(timerRunnable)
         tvTimer.visibility = View.GONE
+        recBorder.visibility = View.GONE
         btnRecord.setImageResource(R.drawable.rec_idle)
         val finish = {
             Thread {
@@ -324,7 +358,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         btnRecord = findViewById(R.id.btnRecord); btnSettings = findViewById(R.id.btnSettings)
         sliderBar = findViewById(R.id.sliderBar); sbMain = findViewById(R.id.sbMain)
         tvAuto = findViewById(R.id.tvAuto); tvSlider = findViewById(R.id.tvSlider)
-        pillLens = findViewById(R.id.pillLens); pillIso = findViewById(R.id.pillIso)
+        pillZoom = findViewById(R.id.pillZoom); pillIso = findViewById(R.id.pillIso)
         pillShutter = findViewById(R.id.pillShutter); pillWb = findViewById(R.id.pillWb)
         pillFocus = findViewById(R.id.pillFocus); pillEv = findViewById(R.id.pillEv)
         settingsPanel = findViewById(R.id.settingsPanel)
@@ -334,6 +368,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         btnLibrary = findViewById(R.id.btnLibrary); libraryPanel = findViewById(R.id.libraryPanel)
         libraryList = findViewById(R.id.libraryList); tvLibEmpty = findViewById(R.id.tvLibEmpty)
         btnLibClose = findViewById(R.id.btnLibClose)
+        guideView = findViewById(R.id.guideView); recBorder = findViewById(R.id.recBorder)
+        zoomChips = findViewById(R.id.zoomChips); vGuide = findViewById(R.id.vGuide); vZoomSpeed = findViewById(R.id.vZoomSpeed)
         btnLibrary.clipToOutline = true
 
         sbMain.progressTintList = ColorStateList.valueOf(Color.WHITE)
@@ -354,10 +390,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         }
 
         // bottom pills
-        pillLens.setOnClickListener {
-            if (recording) lockedToast()
-            else if (lenses.size > 1) { lensIdx = (lensIdx + 1) % lenses.size; rebuildModes(); restartPipeline() }
-        }
+        pillZoom.setOnClickListener { toggleSel(Sel.ZOOM) }
         pillWb.setOnClickListener {
             if (wbModes.isNotEmpty()) { wbIdx = (wbIdx + 1) % wbModes.size; pushSettings(); updateAll() }
         }
@@ -383,6 +416,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                     Sel.ISO -> isoProgress = p
                     Sel.SS -> shutterIdx = p
                     Sel.FOCUS -> { focusProgress = p; autoFocus = false; focusX = -1f; styleAuto(false) }
+                    Sel.ZOOM -> { zoom = sliderToZoom(p); startZoomTick() }
                     Sel.EV -> evProgress = p
                     else -> {}
                 }
@@ -426,6 +460,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             prefs.edit().putInt("rot$d", n).apply()
             gl?.manualQuarterTurns = n
             updateRows()
+        }
+        findViewById<View>(R.id.rowGuide).setOnClickListener { v ->
+            val pm = PopupMenu(this, v)
+            guides.forEachIndexed { i, g -> pm.menu.add(0, i, i, g.first) }
+            pm.menu.setGroupCheckable(0, true, true)
+            pm.menu.getItem(guideIdx).isChecked = true
+            pm.setOnMenuItemClickListener { item -> guideIdx = item.itemId; updateAll(); true }
+            pm.show()
+        }
+        findViewById<View>(R.id.rowZoomSpeed).setOnClickListener {
+            zoomSpeedIdx = (zoomSpeedIdx + 1) % zoomSpeeds.size; updateAll()
         }
     }
 
@@ -509,6 +554,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
         focusX = -1f; focusY = -1f
         lastIso = 0; lastExpNs = 0L
+        val zr = try { camera.zoomRange(lens.id) } catch (t: Throwable) { 1f to 1f }
+        zoomMin = zr.first; zoomMax = maxOf(zr.second, zr.first)
+        zoom = 1f.coerceIn(zoomMin, zoomMax); zoomShown = zoom
+        rebuildChips()
         defaultShutter()
         updateAll()
     }
@@ -549,20 +598,22 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             awbMode = wbModes.getOrNull(wbIdx)?.first ?: CaptureRequest.CONTROL_AWB_MODE_AUTO,
             stab = stabOptions.getOrNull(stabIdx)?.first ?: 0,
             focusX = focusX,
-            focusY = focusY
+            focusY = focusY,
+            zoom = zoomShown
         ))
     }
 
     // ------------------------------------------------------------------ UI refresh
     private fun updateAll() {
-        updateInfo(); updatePills(); updateRows(); updateSliderLabel()
+        updateInfo(); updatePills(); updateRows(); updateSliderLabel(); updateGuide(); updateChips()
         if (stateLoaded) saveState()
     }
 
     private fun updateInfo() {
         val m = modes.getOrNull(modeIdx)
         tvInfo.text = (m?.label ?: "—") + "  ·  S-Log3  ·  " + (if (gamutCine) "S-Gamut3.Cine" else "S-Gamut3")
-        tvInfo2.text = (if (activeHlg) "HLG10" else "SDR") + " → " + (if (activeTenBit) "10-bit" else "8-bit") + " HEVC"
+        tvInfo2.text = (if (activeHlg) "HLG10" else "SDR") + " → " + (if (activeTenBit) "10-bit" else "8-bit") + " HEVC" +
+            (if (guideIdx > 0) "  ·  guide " + guides[guideIdx].first else "")
     }
 
     private fun stylePill(v: TextView, sel: Boolean, manual: Boolean) {
@@ -588,14 +639,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private fun updatePills() {
         val ev = (evProgress - 12) / 4f
-        pillLens.text = lenses.getOrNull(lensIdx)?.label?.substringAfterLast("·")?.trim() ?: "—"
+        pillZoom.text = fmtX(curLensFactor * zoomShown)
         pillIso.text = "ISO ${shownIso()}"
         pillShutter.text = "1/${shownDen()}"
         pillWb.text = wbModes.getOrNull(wbIdx)?.second ?: "WB Auto"
         pillFocus.text = focusText()
         pillEv.text = String.format(Locale.US, "EV %+.1f", ev)
 
-        stylePill(pillLens, false, false)
+        stylePill(pillZoom, selected == Sel.ZOOM, abs(zoom - 1f) > 0.01f)
         stylePill(pillIso, selected == Sel.ISO, !autoExp)
         stylePill(pillShutter, selected == Sel.SS, !autoExp)
         stylePill(pillWb, false, wbIdx != 0)
@@ -611,6 +662,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vAudio.text = if (audioPref) "On" else "Off"
         vAssist.text = if (assistPref) "On" else "Off"
         vRot.text = "${manualFor(displayRotationDeg()) * 90}°"
+        vGuide.text = guides[guideIdx].first
+        vZoomSpeed.text = zoomSpeedNames[zoomSpeedIdx]
     }
 
     private fun refreshSlider() {
@@ -621,6 +674,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             Sel.ISO -> { sbMain.max = 100; sbMain.progress = isoProgress; tvAuto.text = "AUTO"; styleAuto(autoExp) }
             Sel.SS -> { sbMain.max = shutterDen.size - 1; sbMain.progress = shutterIdx; tvAuto.text = "AUTO"; styleAuto(autoExp) }
             Sel.FOCUS -> { sbMain.max = 100; sbMain.progress = focusProgress; tvAuto.text = "AF"; styleAuto(autoFocus) }
+            Sel.ZOOM -> { sbMain.max = 1000; sbMain.progress = zoomToSlider(zoom); tvAuto.visibility = View.GONE }
             Sel.EV -> { sbMain.max = 24; sbMain.progress = evProgress; tvAuto.visibility = View.GONE }
             else -> {}
         }
@@ -632,9 +686,124 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             Sel.ISO -> "ISO ${shownIso()}"
             Sel.SS -> "1/${shownDen()}"
             Sel.FOCUS -> focusText()
+            Sel.ZOOM -> fmtX(curLensFactor * zoomShown)
             Sel.EV -> String.format(Locale.US, "%+.2f EV", (evProgress - 12) / 4f)
             else -> ""
         }
+    }
+
+    // ------------------------------------------------------------------ zoom, lens levels, frame guide
+    private fun fmtX(f: Float): String =
+        if (abs(f - f.roundToInt()) < 0.05f) "${f.roundToInt()}×" else String.format(Locale.US, "%.1f×", f)
+
+    private fun uiZoomMax() = minOf(zoomMax, 15f)
+
+    private fun sliderToZoom(p: Int): Float {
+        val lo = zoomMin; val hi = uiZoomMax()
+        if (hi <= lo) return lo
+        return (lo * Math.pow((hi / lo).toDouble(), p / 1000.0)).toFloat()
+    }
+
+    private fun zoomToSlider(z: Float): Int {
+        val lo = zoomMin; val hi = uiZoomMax()
+        if (hi <= lo) return 0
+        return (1000.0 * ln((z / lo).toDouble()) / ln((hi / lo).toDouble())).roundToInt().coerceIn(0, 1000)
+    }
+
+    /** Glides the real zoom towards the slider value, at the speed chosen in settings. */
+    private val zoomTick = object : Runnable {
+        override fun run() {
+            val tgt = zoom.coerceIn(zoomMin, zoomMax)
+            val speed = zoomSpeeds[zoomSpeedIdx]
+            if (speed <= 0f) {
+                zoomShown = tgt
+            } else {
+                val diff = ln(tgt / zoomShown)
+                if (abs(diff) < 0.003f) {
+                    zoomShown = tgt
+                } else {
+                    val maxStep = speed * 0.033f
+                    val step = (diff * 0.2f).coerceIn(-maxStep, maxStep)
+                    zoomShown *= exp(step)
+                }
+            }
+            pushSettings(); updatePills(); updateSliderLabel(); updateChips()
+            if (abs(ln(tgt / zoomShown)) > 1e-4f) ui.postDelayed(this, 33)
+        }
+    }
+
+    private fun startZoomTick() { ui.removeCallbacks(zoomTick); ui.post(zoomTick) }
+
+    private fun rebuildChips() {
+        zoomChips.removeAllViews(); chipViews.clear()
+        val eqs = lenses.map { l -> try { camera.focalEq(l.id) } catch (t: Throwable) { null } }
+        val valid = eqs.filterNotNull()
+        if (valid.isEmpty()) { chips = emptyList(); curLensFactor = 1f; zoomChips.visibility = View.GONE; return }
+        val ref = valid.minByOrNull { abs(it - 26f) } ?: valid[0]
+        val list = ArrayList<Chip>()
+        eqs.forEachIndexed { i, e -> if (e != null) list.add(Chip(e / ref, i, 1f)) }
+        curLensFactor = eqs.getOrNull(lensIdx)?.let { it / ref } ?: 1f
+
+        // lenses that sit behind this camera's own zoom range (logical multi-camera)
+        val lens = lenses.getOrNull(lensIdx)
+        if (lens != null) {
+            val phys = try { camera.physicalFactors(lens.id) } catch (t: Throwable) { emptyList() }
+            for (pz in phys) {
+                if (abs(pz - 1f) < 0.1f || pz < zoomMin - 0.01f || pz > zoomMax) continue
+                val f = curLensFactor * pz
+                val existing = list.indexOfFirst { abs(it.factor - f) < 0.12f }
+                if (existing >= 0) { if (list[existing].lensIdx != lensIdx) list[existing] = Chip(f, lensIdx, pz) }
+                else list.add(Chip(f, lensIdx, pz))
+            }
+        }
+        list.sortBy { it.factor }
+        chips = list
+        zoomChips.visibility = if (list.size > 1) View.VISIBLE else View.GONE
+        for (c in list) {
+            val tv = TextView(this)
+            tv.text = fmtX(c.factor)
+            tv.textSize = 12f
+            tv.gravity = Gravity.CENTER
+            tv.minWidth = dp(44)
+            tv.setPadding(dp(12), dp(6), dp(12), dp(6))
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(dp(3), 0, dp(3), 0)
+            tv.layoutParams = lp
+            tv.setOnClickListener { onChip(c) }
+            zoomChips.addView(tv)
+            chipViews.add(tv)
+        }
+        updateChips()
+    }
+
+    private fun onChip(c: Chip) {
+        if (c.lensIdx != lensIdx) {
+            if (recording) { lockedToast(); return }
+            lensIdx = c.lensIdx
+            rebuildModes()
+            zoom = c.zoom.coerceIn(zoomMin, zoomMax); zoomShown = zoom
+            restartPipeline()
+        } else {
+            zoom = c.zoom.coerceIn(zoomMin, zoomMax)
+            startZoomTick()
+        }
+        if (selected == Sel.ZOOM) refreshSlider()
+        updateAll()
+    }
+
+    private fun updateChips() {
+        for (i in chips.indices) {
+            val c = chips[i]
+            val on = c.lensIdx == lensIdx && abs(zoom - c.zoom) / c.zoom < 0.04f
+            chipViews.getOrNull(i)?.let { stylePill(it, on, false) }
+        }
+    }
+
+    private fun updateGuide() {
+        val m = modes.getOrNull(modeIdx)
+        val aspect = if (m != null) m.w.toFloat() / m.h else 16f / 9f
+        val g = guides[guideIdx]
+        guideView.setGuide(g.second, aspect, if (g.second > 0f) g.first else "")
     }
 
     // ------------------------------------------------------------------ saved settings
@@ -643,6 +812,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         tenBitPref = prefs.getBoolean("ten", true) && supportsMain10()
         audioPref = prefs.getBoolean("audio", true)
         assistPref = prefs.getBoolean("assist", false)
+        guideIdx = prefs.getInt("guide", 0).coerceIn(0, guides.size - 1)
+        zoomSpeedIdx = prefs.getInt("zoomSpeed", 1).coerceIn(0, zoomSpeeds.size - 1)
     }
 
     private fun loadValues() {
@@ -664,6 +835,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             .putBoolean("ten", tenBitPref)
             .putBoolean("audio", audioPref)
             .putBoolean("assist", assistPref)
+            .putInt("guide", guideIdx)
+            .putInt("zoomSpeed", zoomSpeedIdx)
             .putBoolean("autoExp", autoExp)
             .putBoolean("autoFocus", autoFocus)
             .putInt("iso", isoProgress)
