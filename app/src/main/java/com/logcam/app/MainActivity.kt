@@ -2,7 +2,7 @@ package com.logcam.app
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
+import android.app.Dialog
 import android.content.ClipData
 import android.content.ContentUris
 import android.content.ContentValues
@@ -12,6 +12,10 @@ import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Outline
+import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.StateListDrawable
 import android.graphics.drawable.GradientDrawable
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
@@ -39,6 +43,8 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
+import android.view.ViewOutlineProvider
+import android.view.Window
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.ImageView
@@ -1128,15 +1134,15 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                     val lastPrompted = prefs.getString("lastUpdatePrompted", "")
                     if (lastPrompted == tag || isFinishing || isDestroyed) return@runOnUiThread
                     prefs.edit().putString("lastUpdatePrompted", tag).apply()
-                    AlertDialog.Builder(this)
-                        .setTitle("LogCam update available")
-                        .setMessage("Version $remoteVersion is ready. Open the release page to download and install it.")
-                        .setNegativeButton("Later", null)
-                        .setPositiveButton("View update") { _, _ ->
-                            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl))) }
-                            catch (_: Throwable) { Toast.makeText(this, "Couldn't open the release page", Toast.LENGTH_SHORT).show() }
-                        }
-                        .show()
+                    glassDialog(
+                        title = "LogCam update available",
+                        message = "Version $remoteVersion is ready. Open the release page to download and install it.",
+                        confirmText = "View update",
+                        cancelText = "Later"
+                    ) {
+                        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl))) }
+                        catch (_: Throwable) { Toast.makeText(this, "Couldn't open the release page", Toast.LENGTH_SHORT).show() }
+                    }
                 }
             } catch (_: Throwable) {
                 // Offline, GitHub unavailable, or no published release: keep the camera usable.
@@ -1388,19 +1394,116 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private fun confirmDelete(list: List<Clip>) {
         if (list.isEmpty()) return
-        AlertDialog.Builder(this)
-            .setTitle(if (list.size == 1) "Delete recording?" else "Delete ${list.size} recordings?")
-            .setMessage(if (list.size == 1) list[0].name else "This can't be undone.")
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Delete") { _, _ ->
-                var failed = 0
-                for (c in list) {
-                    try { contentResolver.delete(c.uri, null, null) } catch (t: Throwable) { failed++ }
-                }
-                if (failed > 0) Toast.makeText(this, "$failed couldn't be deleted here - delete them from your Gallery", Toast.LENGTH_LONG).show()
-                showLibrary(); refreshLastThumb()
+        glassDialog(
+            title = if (list.size == 1) "Delete recording?" else "Delete ${list.size} recordings?",
+            message = if (list.size == 1) list[0].name.removeSuffix(".mp4") else "This can't be undone.",
+            confirmText = "Delete"
+        ) {
+            var failed = 0
+            for (c in list) {
+                try { contentResolver.delete(c.uri, null, null) } catch (t: Throwable) { failed++ }
             }
-            .show()
+            if (failed > 0) Toast.makeText(this, "$failed couldn't be deleted here - delete them from your Gallery", Toast.LENGTH_LONG).show()
+            showLibrary(); refreshLastThumb()
+        }
+    }
+
+    /** Minimal frosted-glass confirmation dialog in the app's amber theme (blurred where the phone supports it). */
+    private fun glassDialog(
+        title: String,
+        message: String?,
+        confirmText: String,
+        cancelText: String = "Cancel",
+        onConfirm: () -> Unit
+    ) {
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val blur = Build.VERSION.SDK_INT >= 31 && windowManager.isCrossWindowBlurEnabled
+        val corner = dp(24).toFloat()
+
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, corner) }
+        }
+        root.clipToOutline = true
+
+        val body = LinearLayout(this)
+        body.orientation = LinearLayout.VERTICAL
+        body.setPadding(dp(26), dp(26), dp(26), dp(22))
+
+        val t = TextView(this)
+        t.text = title
+        t.setTextColor(Color.WHITE)
+        t.textSize = 17f
+        t.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        body.addView(t)
+
+        if (!message.isNullOrEmpty()) {
+            val m = TextView(this)
+            m.text = message
+            m.setTextColor(Color.parseColor("#B3FFFFFF"))
+            m.textSize = 13f
+            m.maxLines = 3
+            m.ellipsize = TextUtils.TruncateAt.END
+            m.setPadding(0, dp(8), 0, 0)
+            body.addView(m)
+        }
+        root.addView(body)
+
+        val hair = Color.parseColor("#26FFFFFF")
+        val line = View(this)
+        line.setBackgroundColor(hair)
+        root.addView(line, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1))
+
+        fun button(text: String, color: Int, bold: Boolean, action: () -> Unit): TextView {
+            val b = TextView(this)
+            b.text = text
+            b.setTextColor(color)
+            b.textSize = 15f
+            b.gravity = Gravity.CENTER
+            b.typeface = Typeface.create(if (bold) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
+            val states = StateListDrawable()
+            states.addState(intArrayOf(android.R.attr.state_pressed), ColorDrawable(Color.parseColor("#22FFFFFF")))
+            states.addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
+            b.background = states
+            b.isClickable = true
+            b.setOnClickListener { dialog.dismiss(); action() }
+            return b
+        }
+
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.addView(button(cancelText, Color.parseColor("#D9FFFFFF"), false) { }, LinearLayout.LayoutParams(0, dp(52), 1f))
+        val vline = View(this)
+        vline.setBackgroundColor(hair)
+        row.addView(vline, LinearLayout.LayoutParams(1, LinearLayout.LayoutParams.MATCH_PARENT))
+        row.addView(button(confirmText, AMBER, true, onConfirm), LinearLayout.LayoutParams(0, dp(52), 1f))
+        root.addView(row)
+
+        dialog.setContentView(root)
+
+        val w = dialog.window
+        if (w != null) {
+            val glass = GradientDrawable()
+            glass.shape = GradientDrawable.RECTANGLE
+            glass.cornerRadius = corner
+            glass.setColor(Color.parseColor(if (blur) "#66121212" else "#E6151515"))
+            glass.setStroke(dp(1), Color.parseColor("#33FFFFFF"))
+            w.setBackgroundDrawable(glass)
+            if (blur) w.setBackgroundBlurRadius(dp(40))
+            w.setDimAmount(0.4f)
+            w.setWindowAnimations(android.R.style.Animation_Toast)
+        }
+        dialog.setCanceledOnTouchOutside(true)
+        dialog.show()
+        w?.setLayout(dp(300), WindowManager.LayoutParams.WRAP_CONTENT)
+        w?.setGravity(Gravity.CENTER)
+        if (Build.VERSION.SDK_INT >= 30) w?.insetsController?.hide(WindowInsets.Type.systemBars())
+
+        root.alpha = 0f
+        root.scaleX = 0.94f; root.scaleY = 0.94f
+        root.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(170).start()
     }
 
     private fun refreshLastThumb() {
