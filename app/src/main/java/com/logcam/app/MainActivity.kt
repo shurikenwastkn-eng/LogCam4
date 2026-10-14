@@ -480,7 +480,16 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         pillIso.setOnClickListener { toggleSel(Sel.ISO) }
         pillShutter.setOnClickListener { toggleSel(Sel.SS) }
         pillFocus.setOnClickListener { toggleSel(Sel.FOCUS) }
-slider listeners
+        tvAuto.setOnClickListener { toggleAutoForSelection() }
+
+        sbMain.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                handleSliderProgress(p)
+            }
+            override fun onStartTrackingTouch(s: SeekBar?) {}
+            override fun onStopTrackingTouch(s: SeekBar?) {}
+        })
         // settings sheet
         findViewById<View>(R.id.rowRes).setOnClickListener {
             if (recording) { lockedToast(); return@setOnClickListener }
