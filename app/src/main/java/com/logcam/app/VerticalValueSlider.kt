@@ -9,11 +9,9 @@ import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
 import android.widget.OverScroller
-import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
-/** A compact, camera-style vertical control with a live value readout and inertial drag. */
+/** Compact, precise vertical control for camera settings. */
 class VerticalValueSlider @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
@@ -27,16 +25,15 @@ class VerticalValueSlider @JvmOverloads constructor(
     private val scroller = OverScroller(context)
     private var tracker: VelocityTracker? = null
     private var lastY = 0f
+    private var fractionalProgress = 0f
     private var dragging = false
-    private var touchSlop = 0f
     private val amber = 0xFFFFC23C.toInt()
     private val white = 0xFFF7F7F7.toInt()
-    private val muted = 0xFF9CA3AF.toInt()
-    private val panel = 0xE6101216.toInt()
+    private val muted = 0xFF858B95.toInt()
+    private val panel = 0x00101216
 
     init {
         isClickable = true
-        touchSlop = 8f * density
         contentDescription = "Vertical camera control"
     }
 
@@ -52,8 +49,8 @@ class VerticalValueSlider @JvmOverloads constructor(
         if (next != currentProgress) {
             currentProgress = next
             onProgressChanged?.invoke(next)
-            invalidate()
-        } else invalidate()
+        }
+        invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -61,75 +58,75 @@ class VerticalValueSlider @JvmOverloads constructor(
         val w = width.toFloat()
         val h = height.toFloat()
         val cx = w / 2f
-        val top = 18f * density
-        val bottom = h - 18f * density
+        val top = 12f * density
+        val bottom = h - 12f * density
         val range = (bottom - top).coerceAtLeast(1f)
-        val trackX = cx
         paint.style = Paint.Style.FILL
         paint.color = panel
-        canvas.drawRoundRect(0f, 0f, w, h, 16f * density, 16f * density, paint)
+        canvas.drawRoundRect(0f, 0f, w, h, 10f * density, 10f * density, paint)
 
         paint.color = 0xFF343941.toInt()
-        paint.strokeWidth = 2f * density
-        canvas.drawLine(trackX, top, trackX, bottom, paint)
+        paint.strokeWidth = 1.4f * density
+        canvas.drawLine(cx, top, cx, bottom, paint)
 
         val centerY = bottom - (currentProgress.toFloat() / maxProgress) * range
-        val tickStep = 8
-        for (offset in -5..5) {
-            val y = centerY - offset * 12f * density
+        for (offset in -6..6) {
+            val y = centerY - offset * 8f * density
             if (y < top || y > bottom) continue
-            val longTick = offset == 0 || offset % 5 == 0
-            val len = if (longTick) 21f else 10f
+            val major = offset == 0 || offset % 3 == 0
+            val len = if (major) 15f else 7f
             paint.color = if (offset == 0) amber else muted
-            paint.strokeWidth = if (offset == 0) 2.4f * density else 1.2f * density
-            canvas.drawLine(trackX - len * density / 2f, y, trackX + len * density / 2f, y, paint)
+            paint.strokeWidth = if (offset == 0) 2f * density else 1f * density
+            canvas.drawLine(cx - len * density / 2f, y, cx + len * density / 2f, y, paint)
         }
 
+        val readoutHeight = 28f * density
+        val left = 2f * density
+        val right = w - 2f * density
         paint.style = Paint.Style.FILL
-        paint.color = amber
-        canvas.drawCircle(trackX, centerY, 5f * density, paint)
         paint.color = 0xFF252017.toInt()
-        canvas.drawRoundRect(4f * density, centerY - 18f * density, w - 4f * density, centerY + 18f * density, 9f * density, 9f * density, paint)
+        canvas.drawRoundRect(left, centerY - readoutHeight / 2f, right, centerY + readoutHeight / 2f, 7f * density, 7f * density, paint)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1f * density
         paint.color = amber
-        canvas.drawRoundRect(4f * density, centerY - 18f * density, w - 4f * density, centerY + 18f * density, 9f * density, 9f * density, paint)
+        canvas.drawRoundRect(left, centerY - readoutHeight / 2f, right, centerY + readoutHeight / 2f, 7f * density, 7f * density, paint)
         paint.style = Paint.Style.FILL
         paint.color = white
         paint.textAlign = Paint.Align.CENTER
         paint.typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-        paint.textSize = 12f * density
-        canvas.drawText(valueText(currentProgress), cx, centerY + 4f * density, paint)
+        paint.textSize = 10f * density
+        val label = valueText(currentProgress)
+        val maxTextWidth = w - 8f * density
+        val fitted = if (paint.measureText(label) > maxTextWidth) label.take(7) else label
+        canvas.drawText(fitted, cx, centerY + 3.5f * density, paint)
 
         paint.color = muted
         paint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-        paint.textSize = 9f * density
-        canvas.drawText("MAX", cx, top - 4f * density, paint)
-        canvas.drawText("MIN", cx, bottom + 13f * density, paint)
+        paint.textSize = 7f * density
+        canvas.drawText("MAX", cx, top - 2f * density, paint)
+        canvas.drawText("MIN", cx, bottom + 8f * density, paint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 scroller.forceFinished(true)
+                fractionalProgress = currentProgress.toFloat()
                 tracker?.recycle()
                 tracker = VelocityTracker.obtain().also { it.addMovement(event) }
                 lastY = event.y
                 dragging = true
                 parent?.requestDisallowInterceptTouchEvent(true)
-                performClick()
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
                 tracker?.addMovement(event)
                 if (dragging) {
+                    val travel = (height - 24f * density).coerceAtLeast(1f)
                     val dy = lastY - event.y
-                    val travel = (height - 36f * density).coerceAtLeast(1f)
-                    val delta = (dy / travel * maxProgress).roundToInt()
-                    if (abs(dy) >= touchSlop || delta != 0) {
-                        setProgress(currentProgress + delta)
-                        lastY = event.y
-                    }
+                    fractionalProgress = (fractionalProgress + dy / travel * maxProgress).coerceIn(0f, maxProgress.toFloat())
+                    setProgress(fractionalProgress.toInt())
+                    lastY = event.y
                 }
                 return true
             }
@@ -137,17 +134,17 @@ class VerticalValueSlider @JvmOverloads constructor(
                 tracker?.addMovement(event)
                 tracker?.computeCurrentVelocity(1000)
                 val velocity = -(tracker?.yVelocity ?: 0f)
-                val travel = (height - 36f * density).coerceAtLeast(1f)
-                val progressVelocity = (velocity / travel * maxProgress).roundToInt()
+                val travel = (height - 24f * density).coerceAtLeast(1f)
+                val progressVelocity = velocity / travel * maxProgress
                 tracker?.recycle()
                 tracker = null
                 dragging = false
-                if (abs(progressVelocity) > maxProgress / 2) {
-                    scroller.fling(0, currentProgress, 0, progressVelocity, 0, 0, 0, maxProgress)
+                if (abs(progressVelocity) > maxProgress * 0.25f) {
+                    scroller.fling(0, currentProgress, 0, progressVelocity.toInt(), 0, 0, 0, maxProgress)
                     postInvalidateOnAnimation()
                 }
-                performClick()
                 parent?.requestDisallowInterceptTouchEvent(false)
+                performClick()
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
@@ -164,6 +161,7 @@ class VerticalValueSlider @JvmOverloads constructor(
     override fun computeScroll() {
         if (scroller.computeScrollOffset()) {
             setProgress(scroller.currY)
+            fractionalProgress = scroller.currY.toFloat()
             postInvalidateOnAnimation()
         }
     }
