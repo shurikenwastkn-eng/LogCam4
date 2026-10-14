@@ -11,8 +11,8 @@ android {
         applicationId = "com.logcam.app"
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = providers.gradleProperty("appVersionCode").orNull?.toIntOrNull() ?: 1
+        versionName = providers.gradleProperty("appVersionName").getOrElse("0.1")
     }
 
     signingConfigs {

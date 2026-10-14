@@ -185,6 +185,75 @@
         android:scaleType="fitCenter"
         android:src="@drawable/ic_library" />
 
+    <!-- contextual vertical camera control, shown for ISO and zoom -->
+    <LinearLayout
+        android:id="@+id/verticalControlPanel"
+        android:layout_width="92dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="22dp"
+        android:background="@drawable/bg_panel"
+        android:elevation="8dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingStart="6dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="6dp"
+        android:paddingBottom="10dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvVerticalTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:paddingBottom="6dp"
+            android:text="ISO"
+            android:textColor="#FFC23C"
+            android:textSize="11sp"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:id="@+id/btnZoomPlus"
+            android:layout_width="42dp"
+            android:layout_height="34dp"
+            android:background="@drawable/bg_pill"
+            android:gravity="center"
+            android:text="+"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp"
+            android:visibility="gone" />
+
+        <com.logcam.app.VerticalValueSlider
+            android:id="@+id/verticalSlider"
+            android:layout_width="80dp"
+            android:layout_height="244dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/btnZoomMinus"
+            android:layout_width="42dp"
+            android:layout_height="34dp"
+            android:background="@drawable/bg_pill"
+            android:gravity="center"
+            android:text="−"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/btnVerticalAuto"
+            android:layout_width="match_parent"
+            android:layout_height="34dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/bg_pill"
+            android:gravity="center"
+            android:text="AUTO"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp" />
+    </LinearLayout>
+
     <!-- settings sheet, docked to the right -->
     <LinearLayout
         android:id="@+id/settingsPanel"

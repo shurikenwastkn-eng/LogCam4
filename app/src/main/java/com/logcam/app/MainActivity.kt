@@ -52,6 +52,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.concurrent.Executors
 import java.util.Locale
+import java.net.HttpURLConnection
+import java.net.URL
+import org.json.JSONObject
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
@@ -76,6 +79,12 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var btnRecord: ImageView
     private lateinit var btnSettings: ImageView
     private lateinit var sliderBar: View
+    private lateinit var verticalControlPanel: View
+    private lateinit var verticalSlider: VerticalValueSlider
+    private lateinit var tvVerticalTitle: TextView
+    private lateinit var btnVerticalAuto: TextView
+    private lateinit var btnZoomPlus: TextView
+    private lateinit var btnZoomMinus: TextView
     private lateinit var sbMain: SeekBar
     private lateinit var tvAuto: TextView
     private lateinit var tvSlider: TextView
@@ -99,6 +108,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var tvLibEmpty: TextView
     private lateinit var btnLibClose: TextView
     private var stateLoaded = false
+    private var zoomButtonDirection = 0
+    private var lastUpdateCheckAt = 0L
+    @Volatile private var updateCheckInFlight = false
 
     private lateinit var levelView: LevelView
     private lateinit var tvLock: TextView
@@ -261,6 +273,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         (getSystemService(DISPLAY_SERVICE) as DisplayManager).registerDisplayListener(displayListener, null)
         hasCamPerm = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         startPipeline()
+        checkForUpdates()
     }
 
     override fun onPause() {
@@ -398,6 +411,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         tvTimer = findViewById(R.id.tvTimer)
         btnRecord = findViewById(R.id.btnRecord); btnSettings = findViewById(R.id.btnSettings)
         sliderBar = findViewById(R.id.sliderBar); sbMain = findViewById(R.id.sbMain)
+        verticalControlPanel = findViewById(R.id.verticalControlPanel)
+        verticalSlider = findViewById(R.id.verticalSlider)
+        tvVerticalTitle = findViewById(R.id.tvVerticalTitle)
+        btnVerticalAuto = findViewById(R.id.btnVerticalAuto)
+        btnZoomPlus = findViewById(R.id.btnZoomPlus); btnZoomMinus = findViewById(R.id.btnZoomMinus)
         tvAuto = findViewById(R.id.tvAuto); tvSlider = findViewById(R.id.tvSlider)
         pillZoom = findViewById(R.id.pillZoom); pillIso = findViewById(R.id.pillIso)
         pillShutter = findViewById(R.id.pillShutter); pillWb = findViewById(R.id.pillWb)
@@ -433,6 +451,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         btnLibExport.setOnClickListener { exportClips(selClips.values.toList()) }
         btnLibDelete.setOnClickListener { confirmDelete(selClips.values.toList()) }
         btnSetClose.setOnClickListener { settingsPanel.visibility = View.GONE }
+        btnVerticalAuto.setOnClickListener { toggleAutoForSelection() }
+        verticalSlider.onProgressChanged = { p -> handleSliderProgress(p) }
+        wireZoomButton(btnZoomPlus, 1)
+        wireZoomButton(btnZoomMinus, -1)
         btnSettings.setOnClickListener {
             settingsPanel.visibility = if (settingsPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
@@ -446,40 +468,28 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         // bottom pills
         pillZoom.setOnClickListener { toggleSel(Sel.ZOOM) }
         pillWb.setOnClickListener {
-            if (wbModes.isNotEmpty()) { wbIdx = (wbIdx + 1) % wbModes.size; pushSettings(); updateAll() }
+            if (wbModes.isNotEmpty()) {
+                val pm = PopupMenu(this, pillWb)
+                wbModes.forEachIndexed { i, mode -> pm.menu.add(0, i, i, mode.second) }
+                pm.menu.setGroupCheckable(0, true, true)
+                pm.menu.getItem(wbIdx.coerceIn(0, pm.menu.size() - 1)).isChecked = true
+                pm.setOnMenuItemClickListener { item -> wbIdx = item.itemId; pushSettings(); updateAll(); true }
+                pm.show()
+            }
         }
         pillIso.setOnClickListener { toggleSel(Sel.ISO) }
         pillShutter.setOnClickListener { toggleSel(Sel.SS) }
         pillFocus.setOnClickListener { toggleSel(Sel.FOCUS) }
-        pillEv.setOnClickListener { toggleSel(Sel.EV) }
-
-        tvAuto.setOnClickListener {
-            when (selected) {
-                Sel.ISO, Sel.SS -> { if (autoExp) seedManual(); autoExp = !autoExp }
-                Sel.FOCUS -> if (minFocus > 0f) { autoFocus = !autoFocus; if (autoFocus) focusX = -1f; clearLock() }
-                else -> {}
-            }
-            pushSettings(); refreshSlider(); updateAll()
-        }
+        tvAuto.setOnClickListener { toggleAutoForSelection() }
 
         sbMain.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
                 if (!fromUser) return
-                if ((selected == Sel.ISO || selected == Sel.SS) && autoExp) { seedManual(); autoExp = false; styleAuto(false) }
-                when (selected) {
-                    Sel.ISO -> isoProgress = p
-                    Sel.SS -> shutterIdx = p
-                    Sel.FOCUS -> { focusProgress = p; autoFocus = false; focusX = -1f; clearLock(); styleAuto(false) }
-                    Sel.ZOOM -> { zoom = sliderToZoom(p); startZoomTick() }
-                    Sel.EV -> evProgress = p
-                    else -> {}
-                }
-                pushSettings(); updatePills(); updateSliderLabel()
+                handleSliderProgress(p)
             }
             override fun onStartTrackingTouch(s: SeekBar?) {}
             override fun onStopTrackingTouch(s: SeekBar?) {}
         })
-
         // settings sheet
         findViewById<View>(R.id.rowRes).setOnClickListener {
             if (recording) { lockedToast(); return@setOnClickListener }
@@ -544,6 +554,51 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun toggleSel(s: Sel) {
         selected = if (selected == s) Sel.NONE else s
         refreshSlider(); updateAll()
+    }
+
+    private fun toggleAutoForSelection() {
+        when (selected) {
+            Sel.ISO, Sel.SS -> { if (autoExp) seedManual(); autoExp = !autoExp }
+            Sel.FOCUS -> if (minFocus > 0f) { autoFocus = !autoFocus; if (autoFocus) focusX = -1f; clearLock() }
+            else -> {}
+        }
+        pushSettings(); refreshSlider(); updateAll()
+    }
+
+    private fun handleSliderProgress(p: Int) {
+        if ((selected == Sel.ISO || selected == Sel.SS) && autoExp) { seedManual(); autoExp = false; styleAuto(false) }
+        when (selected) {
+            Sel.ISO -> isoProgress = p.coerceIn(0, 100)
+            Sel.SS -> shutterIdx = p.coerceIn(0, shutterDen.size - 1)
+            Sel.FOCUS -> { focusProgress = p.coerceIn(0, 100); autoFocus = false; focusX = -1f; clearLock(); styleAuto(false) }
+            Sel.ZOOM -> { zoom = sliderToZoom(p).coerceIn(zoomMin, uiZoomMax()); startZoomTick() }
+            Sel.EV -> evProgress = p.coerceIn(0, 24)
+            else -> {}
+        }
+        pushSettings(); updatePills(); updateSliderLabel(); updateVerticalSlider()
+    }
+
+    private fun wireZoomButton(button: TextView, direction: Int) {
+        button.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (selected != Sel.ZOOM) return@setOnTouchListener true
+                    zoomButtonDirection = direction
+                    ui.removeCallbacks(zoomButtonRunnable)
+                    ui.post(zoomButtonRunnable)
+                    v.isPressed = true
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    zoomButtonDirection = 0
+                    ui.removeCallbacks(zoomButtonRunnable)
+                    v.isPressed = false
+                    v.performClick()
+                    true
+                }
+                else -> true
+            }
+        }
     }
 
     // ------------------------------------------------------------------ tap to focus
@@ -660,9 +715,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         shutterIdx = shutterDen.indexOfFirst { it >= fps * 2 }.takeIf { it >= 0 } ?: 0
     }
 
-    private fun isoValue(): Int {
+    private fun isoValue(): Int = isoValueAt(isoProgress)
+
+    private fun isoValueAt(progress: Int): Int {
         val lo = ln(isoMin.toDouble()); val hi = ln(isoMax.toDouble())
-        return exp(lo + (hi - lo) * isoProgress / 100.0).toInt()
+        return exp(lo + (hi - lo) * progress.coerceIn(0, 100) / 100.0).toInt()
     }
 
     /** When leaving auto exposure, start the manual values from what auto was using. */
@@ -765,8 +822,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun refreshSlider() {
-        if (selected == Sel.NONE) { sliderBar.visibility = View.GONE; return }
-        sliderBar.visibility = View.VISIBLE
+        if (selected == Sel.NONE) {
+            sliderBar.visibility = View.GONE
+            verticalControlPanel.visibility = View.GONE
+            return
+        }
+        val vertical = selected == Sel.ISO || selected == Sel.ZOOM
+        sliderBar.visibility = if (vertical) View.GONE else View.VISIBLE
+        verticalControlPanel.visibility = if (vertical) View.VISIBLE else View.GONE
+        tvVerticalTitle.text = if (selected == Sel.ISO) "ISO" else "ZOOM"
+        btnVerticalAuto.visibility = if (selected == Sel.ISO) View.VISIBLE else View.GONE
+        btnZoomPlus.visibility = if (selected == Sel.ZOOM) View.VISIBLE else View.GONE
+        btnZoomMinus.visibility = if (selected == Sel.ZOOM) View.VISIBLE else View.GONE
         tvAuto.visibility = View.VISIBLE
         when (selected) {
             Sel.ISO -> { sbMain.max = 100; sbMain.progress = isoProgress; tvAuto.text = "AUTO"; styleAuto(autoExp) }
@@ -777,6 +844,16 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             else -> {}
         }
         updateSliderLabel()
+        updateVerticalSlider()
+    }
+
+    private fun updateVerticalSlider() {
+        if (!::verticalSlider.isInitialized || (selected != Sel.ISO && selected != Sel.ZOOM)) return
+        if (selected == Sel.ISO) {
+            verticalSlider.configure(100, isoProgress) { p -> "ISO ${isoValueAt(p)}" }
+        } else {
+            verticalSlider.configure(1000, zoomToSlider(zoom)) { p -> fmtX(curLensFactor * sliderToZoom(p)) }
+        }
     }
 
     private fun updateSliderLabel() {
@@ -794,7 +871,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun fmtX(f: Float): String =
         if (abs(f - f.roundToInt()) < 0.05f) "${f.roundToInt()}×" else String.format(Locale.US, "%.1f×", f)
 
-    private fun uiZoomMax() = minOf(zoomMax, 15f)
+    private fun uiZoomMax() = minOf(zoomMax, 15f).coerceAtLeast(zoomMin)
 
     private fun sliderToZoom(p: Int): Float {
         val lo = zoomMin; val hi = uiZoomMax()
@@ -811,7 +888,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     /** Glides the real zoom towards the slider value, at the speed chosen in settings. */
     private val zoomTick = object : Runnable {
         override fun run() {
-            val tgt = zoom.coerceIn(zoomMin, zoomMax)
+            val tgt = zoom.coerceIn(zoomMin, uiZoomMax())
             val speed = zoomSpeeds[zoomSpeedIdx]
             if (speed <= 0f) {
                 zoomShown = tgt
@@ -831,6 +908,20 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun startZoomTick() { ui.removeCallbacks(zoomTick); ui.post(zoomTick) }
+
+    private val zoomButtonRunnable = object : Runnable {
+        override fun run() {
+            val direction = zoomButtonDirection
+            if (direction == 0 || selected != Sel.ZOOM) return
+            val limit = uiZoomMax()
+            val next = (zoom * exp(direction * 0.045f)).coerceIn(zoomMin, limit)
+            zoom = next
+            startZoomTick()
+            updatePills(); updateSliderLabel(); updateVerticalSlider(); updateChips()
+            val atLimit = (direction > 0 && zoom >= limit - 0.001f) || (direction < 0 && zoom <= zoomMin + 0.001f)
+            if (!atLimit && zoomButtonDirection != 0) ui.postDelayed(this, 35)
+        }
+    }
 
     private fun rebuildChips() {
         zoomChips.removeAllViews(); chipViews.clear()
@@ -977,6 +1068,61 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     // ------------------------------------------------------------------ recordings library
+    private fun checkForUpdates() {
+        val now = SystemClock.elapsedRealtime()
+        if (updateCheckInFlight || (lastUpdateCheckAt != 0L && now - lastUpdateCheckAt < 5 * 60 * 1000L)) return
+        lastUpdateCheckAt = now
+        updateCheckInFlight = true
+        Thread {
+            var connection: HttpURLConnection? = null
+            try {
+                connection = (URL("https://api.github.com/repos/shurikenwastkn-eng/LogCam4/releases/latest").openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    requestMethod = "GET"
+                    setRequestProperty("Accept", "application/vnd.github+json")
+                    setRequestProperty("User-Agent", "LogCam-Android")
+                }
+                if (connection.responseCode != HttpURLConnection.HTTP_OK) return@Thread
+                val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                val tag = json.optString("tag_name", "")
+                val remoteVersion = tag.removePrefix("v")
+                val releaseUrl = json.optString("html_url", "https://github.com/shurikenwastkn-eng/LogCam4/releases")
+                if (tag.isBlank() || !isVersionNewer(remoteVersion, (packageManager.getPackageInfo(packageName, 0).versionName ?: "0.1"))) return@Thread
+                runOnUiThread {
+                    val lastPrompted = prefs.getString("lastUpdatePrompted", "")
+                    if (lastPrompted == tag || isFinishing || isDestroyed) return@runOnUiThread
+                    prefs.edit().putString("lastUpdatePrompted", tag).apply()
+                    AlertDialog.Builder(this)
+                        .setTitle("LogCam update available")
+                        .setMessage("Version $remoteVersion is ready. Open the release page to download and install it.")
+                        .setNegativeButton("Later", null)
+                        .setPositiveButton("View update") { _, _ ->
+                            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl))) }
+                            catch (_: Throwable) { Toast.makeText(this, "Couldn't open the release page", Toast.LENGTH_SHORT).show() }
+                        }
+                        .show()
+                }
+            } catch (_: Throwable) {
+                // Offline, GitHub unavailable, or no published release: keep the camera usable.
+            } finally {
+                connection?.disconnect()
+                updateCheckInFlight = false
+            }
+        }.start()
+    }
+
+    private fun isVersionNewer(remote: String, local: String): Boolean {
+        val r = remote.split(".").map { it.toIntOrNull() ?: 0 }
+        val l = local.split(".").map { it.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(r.size, l.size)) {
+            val rv = r.getOrElse(i) { 0 }
+            val lv = l.getOrElse(i) { 0 }
+            if (rv != lv) return rv > lv
+        }
+        return false
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun openLibrary() {

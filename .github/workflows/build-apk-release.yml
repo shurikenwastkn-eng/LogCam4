@@ -1,10 +1,10 @@
-name: Build APK and publish releases
+name: Build APK and publish latest version
 
 on:
   push:
     branches: [main]
-    tags:
-      - "v*"
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,6 +13,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      APP_VERSION: 0.1.${{ github.run_number }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -28,8 +30,10 @@ jobs:
         with:
           gradle-version: "8.7"
 
-      - name: Build APK
-        run: gradle --no-daemon assembleDebug
+      - name: Build versioned APK
+        run: |
+          VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
+          gradle --no-daemon assembleDebug -PappVersionName="$APP_VERSION" -PappVersionCode="$VERSION_CODE"
 
       - name: Prepare APK
         shell: bash
@@ -45,10 +49,13 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish latest GitHub Release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          name: LogCam ${{ github.ref_name }}
+          tag_name: v${{ env.APP_VERSION }}
+          name: LogCam ${{ env.APP_VERSION }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
+          make_latest: true
           files: release-files/LogCam.apk
