@@ -233,8 +233,8 @@
 
         <TextView
             android:id="@+id/btnZoomMinus"
-            android:layout_width="42dp"
-            android:layout_height="34dp"
+            android:layout_width="34dp"
+            android:layout_height="29dp"
             android:background="@drawable/bg_pill"
             android:gravity="center"
             android:text="−"
