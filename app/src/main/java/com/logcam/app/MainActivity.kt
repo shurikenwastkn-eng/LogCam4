@@ -1488,11 +1488,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             val glass = GradientDrawable()
             glass.shape = GradientDrawable.RECTANGLE
             glass.cornerRadius = corner
-            glass.setColor(Color.parseColor(if (blur) "#66121212" else "#E6151515"))
+            glass.setColor(Color.parseColor(if (blur) "#F2121212" else "#F5151515"))
             glass.setStroke(dp(1), Color.parseColor("#33FFFFFF"))
             w.setBackgroundDrawable(glass)
-            if (blur) w.setBackgroundBlurRadius(dp(40))
-            w.setDimAmount(0.4f)
+            if (blur) w.setBackgroundBlurRadius(dp(48))
+            w.setDimAmount(0.55f)
             w.setWindowAnimations(android.R.style.Animation_Toast)
         }
         dialog.setCanceledOnTouchOutside(true)
