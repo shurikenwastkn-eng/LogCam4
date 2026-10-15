@@ -104,6 +104,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var exposureControls: View
     private lateinit var vControlPosition: TextView
     private var controlPosition = "Side"
+    private var accentColor = Color.parseColor("#FFC23C")
+    private val accentOptions = listOf("Amber" to "#FFC23C", "Green" to "#36D17C", "Cyan" to "#39D9FF", "Blue" to "#579BFF", "Purple" to "#B58CFF", "Pink" to "#FF70B7", "Red" to "#FF6262", "White" to "#F5F5F5")
     private lateinit var vRes: TextView
     private lateinit var vGamut: TextView
     private lateinit var vStab: TextView
@@ -222,7 +224,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private var recording = false
     private var recStartMs = 0L
 
-    private val AMBER = Color.parseColor("#FFC23C")
+    private val AMBER: Int get() = accentColor
 
     private val timerRunnable = object : Runnable {
         override fun run() {
@@ -248,6 +250,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         bindViews()
 
         controlPosition = prefs.getString("controlPosition", "Side") ?: "Side"
+        accentColor = Color.parseColor(prefs.getString("accentColor", "#FFC23C") ?: "#FFC23C")
         loadFlags()
         lenses = try { camera.backCameras() } catch (t: Throwable) { emptyList() }
         lensIdx = lenses.indexOfFirst { it.id == prefs.getString("lensId", "") }.coerceAtLeast(0)
@@ -552,6 +555,15 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         findViewById<View>(R.id.rowGrid).setOnClickListener {
             showGlassChoice("Grid lines", gridNames, gridIdx) { index -> gridIdx = index; updateAll() }
         }
+        findViewById<View>(R.id.rowAccentColor).setOnClickListener {
+            val selectedColor = String.format("#%06X", 0xFFFFFF and accentColor)
+            val selected = accentOptions.indexOfFirst { it.second.equals(selectedColor, true) }.coerceAtLeast(0)
+            showGlassChoice("Interface colour", accentOptions.map { it.first }, selected) { index ->
+                accentColor = Color.parseColor(accentOptions[index].second)
+                prefs.edit().putString("accentColor", accentOptions[index].second).apply()
+                applyAccentColor(); updateAll(); updateRows()
+            }
+        }
         findViewById<View>(R.id.rowControlPosition).setOnClickListener {
             val choices = listOf("Top", "Bottom", "Side")
             showGlassChoice("Control position", choices, choices.indexOf(controlPosition).coerceAtLeast(0)) { index ->
@@ -678,7 +690,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun showFocusRing(x: Float, y: Float, locked: Boolean) {
         val size = if (focusRing.width > 0) focusRing.width else (76 * resources.displayMetrics.density).toInt()
         focusRing.animate().cancel()
-        if (locked) focusRing.background = shape(Color.parseColor("#22FFC23C"), 0f, AMBER, 3f, true)
+        if (locked) focusRing.background = shape(accentWithAlpha(0x22), 0f, AMBER, 3f, true)
         else focusRing.setBackgroundResource(R.drawable.focus_ring)
         focusRing.x = x - size / 2f
         focusRing.y = y - size / 2f
@@ -836,6 +848,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun updateRows() {
         applyControlPosition()
         vControlPosition.text = controlPosition
+        val colorHex = String.format("#%06X", 0xFFFFFF and accentColor)
+        vAccentColor.text = accentOptions.firstOrNull { it.second.equals(colorHex, true) }?.first ?: "Custom"
         vRes.text = modes.getOrNull(modeIdx)?.label ?: "—"
         vGamut.text = if (gamutCine) "S-Gamut3.Cine" else "S-Gamut3"
         vStab.text = stabOptions.getOrNull(stabIdx)?.second ?: "Off"
@@ -881,8 +895,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
                     cornerRadius = dp(12).toFloat()
-                    setColor(if (selected) Color.parseColor("#33FFC23C") else Color.TRANSPARENT)
-                    if (selected) setStroke(dp(1), Color.parseColor("#99FFC23C"))
+                    setColor(if (selected) accentWithAlpha(0x33) else Color.TRANSPARENT)
+                    if (selected) setStroke(dp(1), accentWithAlpha(0x99))
                 }
                 isClickable = true
                 isFocusable = true
@@ -894,12 +908,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 typeface = Typeface.create(if (selected) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
                 setPadding(0, 0, dp(8), 0)
             }
-            row.addView(name, LinearLayout.LayoutParams(0, dp(46), 1f))
-            val mark = TextView(this).apply {
-                text = if (selected) "✓" else ""
-                textSize = 18f; setTextColor(AMBER); gravity = Gravity.CENTER
-            }
-            row.addView(mark, LinearLayout.LayoutParams(dp(28), dp(46)))
+            name.gravity = Gravity.CENTER
+            row.addView(name, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)))
             row.setOnClickListener { dialog.dismiss(); onChoose(index) }
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46))
             lp.bottomMargin = dp(4)
@@ -917,6 +927,26 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         w?.setGravity(Gravity.CENTER)
     }
 
+    private fun accentWithAlpha(alpha: Int): Int = (accentColor and 0x00FFFFFF) or (alpha shl 24)
+
+    private fun applyAccentColor() {
+        if (::tvAuto.isInitialized) tvAuto.setTextColor(accentColor)
+        if (::tvSlider.isInitialized) tvSlider.setTextColor(accentColor)
+        if (::vAccentColor.isInitialized) {
+            vAccentColor.setTextColor(accentColor)
+            vAccentColor.background = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(accentWithAlpha(0x22))
+                setStroke(dp(1), accentWithAlpha(0x99))
+            }
+        }
+        if (::verticalSlider.isInitialized) verticalSlider.invalidate()
+        if (::pillIso.isInitialized) listOf(pillIso, pillShutter, pillWb, pillFocus, pillEv, pillZoom).forEach { view ->
+            if (view.isSelected) view.setTextColor(Color.BLACK)
+            else if (view.isActivated) view.setTextColor(accentColor)
+        }
+    }
+
     private fun applyControlPosition() {
         if (!::exposureControls.isInitialized) return
         val lp = exposureControls.layoutParams as? FrameLayout.LayoutParams ?: return
@@ -927,8 +957,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         }
         lp.leftMargin = if (controlPosition == "Side") dp(24) else 0
         lp.rightMargin = 0
-        lp.topMargin = if (controlPosition == "Top") dp(76) else 0
-        lp.bottomMargin = if (controlPosition == "Bottom") dp(86) else 0
+        lp.topMargin = if (controlPosition == "Top") dp(88) else 0
+        // Keep the independent bottom zoom/lens chips unobstructed.
+        lp.bottomMargin = if (controlPosition == "Bottom") dp(104) else 0
         exposureControls.layoutParams = lp
     }
 
@@ -1360,7 +1391,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         slp.setMargins(0, dp(6), dp(6), 0)
 
         val sel = FrameLayout(this)
-        sel.background = shape(Color.parseColor("#33FFC23C"), 12f, AMBER, 3f)
+        sel.background = shape(accentWithAlpha(0x33), 12f, AMBER, 3f)
         val chk = TextView(this)
         chk.text = "✓"
         chk.setTextColor(Color.BLACK)
