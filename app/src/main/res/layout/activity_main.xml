@@ -112,6 +112,7 @@
 
     <!-- left: exposure controls -->
     <LinearLayout
+        android:id="@+id/exposureControls"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="start|center_vertical"
@@ -341,6 +342,12 @@
             <LinearLayout android:id="@+id/rowLevel" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Level" />
                 <TextView android:id="@+id/vLevel" style="@style/rowValue" />
+            </LinearLayout>
+
+                <TextView style="@style/section" android:text="INTERFACE" />
+            <LinearLayout android:id="@+id/rowControlPosition" style="@style/row">
+                <TextView style="@style/rowLabel" android:text="Control position" />
+                <TextView android:id="@+id/vControlPosition" style="@style/rowValue" />
             </LinearLayout>
 
                 <TextView style="@style/section" android:text="ZOOM" />

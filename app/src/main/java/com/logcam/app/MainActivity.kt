@@ -101,6 +101,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var pillFocus: TextView
     private lateinit var pillEv: TextView
     private lateinit var settingsPanel: View
+    private lateinit var exposureControls: View
+    private lateinit var vControlPosition: TextView
+    private var controlPosition = "Side"
     private lateinit var vRes: TextView
     private lateinit var vGamut: TextView
     private lateinit var vStab: TextView
@@ -244,6 +247,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         camera = CameraController(this)
         bindViews()
 
+        controlPosition = prefs.getString("controlPosition", "Side") ?: "Side"
         loadFlags()
         lenses = try { camera.backCameras() } catch (t: Throwable) { emptyList() }
         lensIdx = lenses.indexOfFirst { it.id == prefs.getString("lensId", "") }.coerceAtLeast(0)
@@ -427,6 +431,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         pillShutter = findViewById(R.id.pillShutter); pillWb = findViewById(R.id.pillWb)
         pillFocus = findViewById(R.id.pillFocus); pillEv = findViewById(R.id.pillEv)
         settingsPanel = findViewById(R.id.settingsPanel)
+        exposureControls = findViewById(R.id.exposureControls)
+        vControlPosition = findViewById(R.id.vControlPosition)
         vRes = findViewById(R.id.vRes); vGamut = findViewById(R.id.vGamut); vStab = findViewById(R.id.vStab)
         vTen = findViewById(R.id.vTen); vAudio = findViewById(R.id.vAudio)
         vAssist = findViewById(R.id.vAssist); vRot = findViewById(R.id.vRot)
@@ -484,12 +490,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 dismissCameraControl()
                 settingsPanel.visibility = View.GONE
                 libraryPanel.visibility = View.GONE
-                val pm = PopupMenu(this, pillWb)
-                wbModes.forEachIndexed { i, mode -> pm.menu.add(0, i, i, mode.second) }
-                pm.menu.setGroupCheckable(0, true, true)
-                pm.menu.getItem(wbIdx.coerceIn(0, pm.menu.size() - 1)).isChecked = true
-                pm.setOnMenuItemClickListener { item -> wbIdx = item.itemId; pushSettings(); updateAll(); true }
-                pm.show()
+                showGlassChoice("White balance", wbModes.map { it.second }, wbIdx) { index ->
+                    wbIdx = index; pushSettings(); updateAll()
+                }
             }
         }
         pillIso.setOnClickListener { toggleSel(Sel.ISO) }
@@ -540,24 +543,23 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             gl?.manualQuarterTurns = n
             updateRows()
         }
-        findViewById<View>(R.id.rowGuide).setOnClickListener { v ->
-            val pm = PopupMenu(this, v)
-            guides.forEachIndexed { i, g -> pm.menu.add(0, i, i, g.first) }
-            pm.menu.setGroupCheckable(0, true, true)
-            pm.menu.getItem(guideIdx).isChecked = true
-            pm.setOnMenuItemClickListener { item -> guideIdx = item.itemId; updateAll(); true }
-            pm.show()
+        findViewById<View>(R.id.rowGuide).setOnClickListener {
+            showGlassChoice("Frame guide", guides.map { it.first }, guideIdx) { index -> guideIdx = index; updateAll() }
         }
         findViewById<View>(R.id.rowZoomSpeed).setOnClickListener {
             zoomSpeedIdx = (zoomSpeedIdx + 1) % zoomSpeeds.size; updateAll()
         }
-        findViewById<View>(R.id.rowGrid).setOnClickListener { v ->
-            val pm = PopupMenu(this, v)
-            gridNames.forEachIndexed { i, n -> pm.menu.add(0, i, i, n) }
-            pm.menu.setGroupCheckable(0, true, true)
-            pm.menu.getItem(gridIdx).isChecked = true
-            pm.setOnMenuItemClickListener { item -> gridIdx = item.itemId; updateAll(); true }
-            pm.show()
+        findViewById<View>(R.id.rowGrid).setOnClickListener {
+            showGlassChoice("Grid lines", gridNames, gridIdx) { index -> gridIdx = index; updateAll() }
+        }
+        findViewById<View>(R.id.rowControlPosition).setOnClickListener {
+            val choices = listOf("Top", "Bottom", "Side")
+            showGlassChoice("Control position", choices, choices.indexOf(controlPosition).coerceAtLeast(0)) { index ->
+                controlPosition = choices[index]
+                prefs.edit().putString("controlPosition", controlPosition).apply()
+                applyControlPosition()
+                updateRows()
+            }
         }
         findViewById<View>(R.id.rowLevel).setOnClickListener {
             levelOn = !levelOn
@@ -832,6 +834,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun updateRows() {
+        applyControlPosition()
+        vControlPosition.text = controlPosition
         vRes.text = modes.getOrNull(modeIdx)?.label ?: "—"
         vGamut.text = if (gamutCine) "S-Gamut3.Cine" else "S-Gamut3"
         vStab.text = stabOptions.getOrNull(stabIdx)?.second ?: "Off"
@@ -845,7 +849,91 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vLevel.text = if (levelOn) "On" else "Off"
     }
 
+    /** Dark, amber-accented selection sheet used instead of the platform PopupMenu. */
+    private fun showGlassChoice(title: String, options: List<String>, selectedIndex: Int, onChoose: (Int) -> Unit) {
+        if (options.isEmpty()) return
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(12))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(22).toFloat()
+                setColor(Color.parseColor("#F20D1014"))
+                setStroke(dp(1), Color.parseColor("#40FFFFFF"))
+            }
+        }
+        val heading = TextView(this).apply {
+            text = title.uppercase(Locale.getDefault())
+            setTextColor(AMBER); textSize = 12f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            letterSpacing = 0.08f
+            setPadding(dp(8), dp(4), dp(8), dp(12))
+        }
+        root.addView(heading)
+        options.forEachIndexed { index, label ->
+            val selected = index == selectedIndex
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), 0, dp(12), 0)
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(12).toFloat()
+                    setColor(if (selected) Color.parseColor("#33FFC23C") else Color.TRANSPARENT)
+                    if (selected) setStroke(dp(1), Color.parseColor("#99FFC23C"))
+                }
+                isClickable = true
+                isFocusable = true
+            }
+            val name = TextView(this).apply {
+                text = label
+                textSize = 15f
+                setTextColor(if (selected) AMBER else Color.WHITE)
+                typeface = Typeface.create(if (selected) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
+                setPadding(0, 0, dp(8), 0)
+            }
+            row.addView(name, LinearLayout.LayoutParams(0, dp(46), 1f))
+            val mark = TextView(this).apply {
+                text = if (selected) "✓" else ""
+                textSize = 18f; setTextColor(AMBER); gravity = Gravity.CENTER
+            }
+            row.addView(mark, LinearLayout.LayoutParams(dp(28), dp(46)))
+            row.setOnClickListener { dialog.dismiss(); onChoose(index) }
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46))
+            lp.bottomMargin = dp(4)
+            root.addView(row, lp)
+        }
+        dialog.setContentView(root)
+        val w = dialog.window
+        w?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        if (Build.VERSION.SDK_INT >= 31 && windowManager.isCrossWindowBlurEnabled) w?.setBackgroundBlurRadius(dp(36))
+        w?.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        w?.setDimAmount(0.5f)
+        dialog.setCanceledOnTouchOutside(true)
+        dialog.show()
+        w?.setLayout(dp(280), WindowManager.LayoutParams.WRAP_CONTENT)
+        w?.setGravity(Gravity.CENTER)
+    }
+
+    private fun applyControlPosition() {
+        if (!::exposureControls.isInitialized) return
+        val lp = exposureControls.layoutParams as? FrameLayout.LayoutParams ?: return
+        lp.gravity = when (controlPosition) {
+            "Top" -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            "Bottom" -> Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            else -> Gravity.START or Gravity.CENTER_VERTICAL
+        }
+        lp.leftMargin = if (controlPosition == "Side") dp(24) else 0
+        lp.rightMargin = 0
+        lp.topMargin = if (controlPosition == "Top") dp(76) else 0
+        lp.bottomMargin = if (controlPosition == "Bottom") dp(86) else 0
+        exposureControls.layoutParams = lp
+    }
+
     private fun refreshSlider() {
+        applyControlPosition()
         val visible = selected != Sel.NONE
         sliderBar.visibility = View.GONE
         verticalControlPanel.visibility = if (visible) View.VISIBLE else View.GONE
