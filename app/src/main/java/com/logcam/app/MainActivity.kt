@@ -834,6 +834,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun updateRows() {
+        applyControlPosition()
         vControlPosition.text = controlPosition
         vRes.text = modes.getOrNull(modeIdx)?.label ?: "—"
         vGamut.text = if (gamutCine) "S-Gamut3.Cine" else "S-Gamut3"
