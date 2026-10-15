@@ -345,6 +345,10 @@
             </LinearLayout>
 
                 <TextView style="@style/section" android:text="INTERFACE" />
+            <LinearLayout android:id="@+id/rowAccentColor" style="@style/row">
+                <TextView style="@style/rowLabel" android:text="Interface colour" />
+                <TextView android:id="@+id/vAccentColor" style="@style/rowValue" />
+            </LinearLayout>
             <LinearLayout android:id="@+id/rowControlPosition" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Control position" />
                 <TextView android:id="@+id/vControlPosition" style="@style/rowValue" />
