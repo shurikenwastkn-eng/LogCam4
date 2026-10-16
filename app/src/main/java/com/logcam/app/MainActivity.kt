@@ -445,16 +445,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             }
         }
         settingsPanel.clipToOutline = true
-        val settingsScroll = findViewById<ScrollView>(R.id.settingsPanel).let { panel ->
-            (panel as? ViewGroup)?.let { group ->
-                fun findScroll(v: View): ScrollView? {
-                    if (v is ScrollView) return v
-                    if (v is ViewGroup) for (i in 0 until v.childCount) findScroll(v.getChildAt(i))?.let { return it }
-                    return null
+        fun findSettingsScroll(view: View): ScrollView? {
+            if (view is ScrollView) return view
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) {
+                    val found = findSettingsScroll(view.getChildAt(i))
+                    if (found != null) return found
                 }
-                findScroll(group)
             }
+            return null
         }
+        val settingsScroll = findSettingsScroll(settingsPanel)
         settingsScroll?.apply {
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
