@@ -67,6 +67,7 @@
     <!-- top centre: lock badge -->
     <TextView
         android:id="@+id/tvLock"
+        android:tag="accent"
         style="@style/pill"
         android:layout_gravity="top|center_horizontal"
         android:layout_marginTop="18dp"
@@ -205,6 +206,7 @@
 
         <TextView
             android:id="@+id/tvVerticalTitle"
+            android:tag="accent"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center"
@@ -304,7 +306,7 @@
                 android:paddingEnd="16dp"
                 android:paddingBottom="20dp">
 
-                <TextView style="@style/section" android:text="VIDEO" />
+                <TextView style="@style/section" android:tag="accent" android:text="VIDEO" />
             <LinearLayout android:id="@+id/rowRes" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Resolution" />
                 <TextView android:id="@+id/vRes" style="@style/rowValue" />
@@ -326,7 +328,7 @@
                 <TextView android:id="@+id/vAudio" style="@style/rowValue" />
             </LinearLayout>
 
-                <TextView style="@style/section" android:text="MONITORING" />
+                <TextView style="@style/section" android:tag="accent" android:text="MONITORING" />
             <LinearLayout android:id="@+id/rowAssist" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Rec.709 preview" />
                 <TextView android:id="@+id/vAssist" style="@style/rowValue" />
@@ -344,19 +346,23 @@
                 <TextView android:id="@+id/vLevel" style="@style/rowValue" />
             </LinearLayout>
 
-                <TextView style="@style/section" android:text="INTERFACE" />
+                <TextView style="@style/section" android:tag="accent" android:text="INTERFACE" />
             <LinearLayout android:id="@+id/rowControlPosition" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Control position" />
                 <TextView android:id="@+id/vControlPosition" style="@style/rowValue" />
             </LinearLayout>
+            <LinearLayout android:id="@+id/rowAccent" style="@style/row">
+                <TextView style="@style/rowLabel" android:text="Interface color" />
+                <TextView android:id="@+id/vAccent" style="@style/rowValue" />
+            </LinearLayout>
 
-                <TextView style="@style/section" android:text="ZOOM" />
+                <TextView style="@style/section" android:tag="accent" android:text="ZOOM" />
             <LinearLayout android:id="@+id/rowZoomSpeed" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Zoom speed" />
                 <TextView android:id="@+id/vZoomSpeed" style="@style/rowValue" />
             </LinearLayout>
 
-                <TextView style="@style/section" android:text="ORIENTATION" />
+                <TextView style="@style/section" android:tag="accent" android:text="ORIENTATION" />
             <LinearLayout android:id="@+id/rowRot" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Fix orientation" />
                 <TextView android:id="@+id/vRot" style="@style/rowValue" />
