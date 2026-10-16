@@ -27,7 +27,7 @@ class VerticalValueSlider @JvmOverloads constructor(
     private var lastY = 0f
     private var fractionalProgress = 0f
     private var dragging = false
-    private val amber = 0xFFFFC23C.toInt()
+    private val amber: Int get() = Theme.accent
     private val white = 0xFFF7F7F7.toInt()
     private val muted = 0xFF858B95.toInt()
     private val panel = 0x00101216

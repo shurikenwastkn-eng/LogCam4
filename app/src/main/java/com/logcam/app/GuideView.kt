@@ -61,6 +61,8 @@ class GuideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
         if (width == 0 || height == 0) return
         if (ratio <= 0f && gridType == 0) return
         val vw = width.toFloat(); val vh = height.toFloat()
+        frameLine.color = Theme.accent
+        text.color = Theme.accent
 
         // area the camera image occupies inside the view
         val cw: Float; val ch: Float

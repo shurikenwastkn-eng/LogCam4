@@ -43,6 +43,8 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
+import android.widget.ScrollView
+import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.Window
 import android.view.WindowInsets
@@ -103,6 +105,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var settingsPanel: View
     private lateinit var exposureControls: View
     private lateinit var vControlPosition: TextView
+    private lateinit var vAccent: TextView
+    private var lastLayoutKey = ""
+    private val MP = LinearLayout.LayoutParams.MATCH_PARENT
+    private val WC = LinearLayout.LayoutParams.WRAP_CONTENT
     private var controlPosition = "Side"
     private lateinit var vRes: TextView
     private lateinit var vGamut: TextView
@@ -222,7 +228,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private var recording = false
     private var recStartMs = 0L
 
-    private val AMBER = Color.parseColor("#FFC23C")
+    private val AMBER: Int get() = Theme.accent
 
     private val timerRunnable = object : Runnable {
         override fun run() {
@@ -244,8 +250,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_main)
         prefs = getSharedPreferences("logcam", MODE_PRIVATE)
+        Theme.accent = prefs.getInt("accent", Theme.DEFAULT)
         camera = CameraController(this)
         bindViews()
+        restyleTree(findViewById<View>(android.R.id.content))
 
         controlPosition = prefs.getString("controlPosition", "Side") ?: "Side"
         loadFlags()
@@ -433,6 +441,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         settingsPanel = findViewById(R.id.settingsPanel)
         exposureControls = findViewById(R.id.exposureControls)
         vControlPosition = findViewById(R.id.vControlPosition)
+        vAccent = findViewById(R.id.vAccent)
         vRes = findViewById(R.id.vRes); vGamut = findViewById(R.id.vGamut); vStab = findViewById(R.id.vStab)
         vTen = findViewById(R.id.vTen); vAudio = findViewById(R.id.vAudio)
         vAssist = findViewById(R.id.vAssist); vRot = findViewById(R.id.vRot)
@@ -561,6 +570,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 updateRows()
             }
         }
+        findViewById<View>(R.id.rowAccent).setOnClickListener { showAccentPicker() }
         findViewById<View>(R.id.rowLevel).setOnClickListener {
             levelOn = !levelOn
             if (levelOn) registerLevel() else { sensors.unregisterListener(levelListener); gravInit = false; levelView.visibility = View.GONE }
@@ -678,8 +688,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun showFocusRing(x: Float, y: Float, locked: Boolean) {
         val size = if (focusRing.width > 0) focusRing.width else (76 * resources.displayMetrics.density).toInt()
         focusRing.animate().cancel()
-        if (locked) focusRing.background = shape(Color.parseColor("#22FFC23C"), 0f, AMBER, 3f, true)
-        else focusRing.setBackgroundResource(R.drawable.focus_ring)
+        if (locked) focusRing.background = shape(Theme.alpha(AMBER, 0x22), 0f, AMBER, 3f, true)
+        else focusRing.background = shape(Color.TRANSPARENT, 0f, AMBER, 2f, true)
         focusRing.x = x - size / 2f
         focusRing.y = y - size / 2f
         focusRing.alpha = 1f
@@ -794,13 +804,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun stylePill(v: TextView, sel: Boolean, manual: Boolean) {
-        v.setBackgroundResource(if (sel) R.drawable.bg_pill_selected else R.drawable.bg_pill)
-        v.setTextColor(if (sel) Color.BLACK else if (manual) AMBER else Color.WHITE)
+        v.background = pillBg(sel)
+        v.setTextColor(if (sel) Theme.onAccent() else if (manual) AMBER else Color.WHITE)
     }
 
     private fun styleAuto(on: Boolean) {
-        tvAuto.setBackgroundResource(if (on) R.drawable.bg_pill_selected else R.drawable.bg_pill)
-        tvAuto.setTextColor(if (on) Color.BLACK else Color.WHITE)
+        tvAuto.background = pillBg(on)
+        tvAuto.setTextColor(if (on) Theme.onAccent() else Color.WHITE)
     }
 
     private fun focusText(): String {
@@ -836,6 +846,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun updateRows() {
         applyControlPosition()
         vControlPosition.text = controlPosition
+        vAccent.text = "●  " + Theme.hex(Theme.accent)
+        vAccent.setTextColor(Theme.accent)
         vRes.text = modes.getOrNull(modeIdx)?.label ?: "—"
         vGamut.text = if (gamutCine) "S-Gamut3.Cine" else "S-Gamut3"
         vStab.text = stabOptions.getOrNull(stabIdx)?.second ?: "Off"
@@ -849,77 +861,305 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vLevel.text = if (levelOn) "On" else "Off"
     }
 
-    /** Dark, amber-accented selection sheet used instead of the platform PopupMenu. */
+    // ------------------------------------------------------------------ theme + glass surfaces
+    private fun near(a: Int, b: Int): Boolean =
+        abs(Color.red(a) - Color.red(b)) < 4 && abs(Color.green(a) - Color.green(b)) < 4 && abs(Color.blue(a) - Color.blue(b)) < 4
+
+    private fun pillBg(selected: Boolean): GradientDrawable {
+        val g = GradientDrawable()
+        g.shape = GradientDrawable.RECTANGLE
+        g.cornerRadius = dp(8).toFloat()
+        if (selected) {
+            g.setColor(Theme.accent)
+        } else {
+            g.setColor(Color.parseColor("#B30C0D10"))
+            g.setStroke(dp(1), Theme.alpha(Theme.accent, 0x44))
+        }
+        return g
+    }
+
+    /** Re-tints the hairline borders and accent text of the views that come from the XML layout. */
+    private fun restyleTree(v: View) {
+        if (v === libraryList || v === zoomChips) return
+        if (v is TextView && v.tag == "accent") v.setTextColor(Theme.accent)
+        val bg = v.background
+        if (bg is GradientDrawable && v.id != R.id.recBorder && v.id != R.id.focusRing) {
+            (bg.mutate() as GradientDrawable).setStroke(dp(1), Theme.alpha(Theme.accent, 0x44))
+        }
+        if (v is ViewGroup) for (k in 0 until v.childCount) restyleTree(v.getChildAt(k))
+    }
+
+    private fun applyTheme() {
+        restyleTree(findViewById<View>(android.R.id.content))
+        guideView.invalidate(); levelView.invalidate()
+        if (::verticalSlider.isInitialized) verticalSlider.invalidate()
+        updatePills(); updateChips(); updateRows()
+        if (selected != Sel.NONE) refreshSlider()
+    }
+
+    private fun hairline(): View {
+        val v = View(this)
+        v.setBackgroundColor(Color.parseColor("#26FFFFFF"))
+        return v
+    }
+
+    private fun pressable(): StateListDrawable {
+        val st = StateListDrawable()
+        st.addState(intArrayOf(android.R.attr.state_pressed), ColorDrawable(Color.parseColor("#22FFFFFF")))
+        st.addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
+        return st
+    }
+
+    private fun glassButton(text: String, color: Int, bold: Boolean, action: () -> Unit): TextView {
+        val b = TextView(this)
+        b.text = text
+        b.setTextColor(color)
+        b.textSize = 15f
+        b.gravity = Gravity.CENTER
+        b.typeface = Typeface.create(if (bold) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
+        b.background = pressable()
+        b.isClickable = true
+        b.setOnClickListener { action() }
+        return b
+    }
+
+    /** Shows [root] in a frosted-glass window (real background blur on Android 12+ when the phone allows it). */
+    private fun presentGlass(dialog: Dialog, root: View, widthDp: Int, dim: Float = 0.5f) {
+        val blur = Build.VERSION.SDK_INT >= 31 && windowManager.isCrossWindowBlurEnabled
+        val corner = dp(24).toFloat()
+        root.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, corner) }
+        }
+        root.clipToOutline = true
+        dialog.setContentView(root)
+        val w = dialog.window
+        if (w != null) {
+            val glass = GradientDrawable()
+            glass.shape = GradientDrawable.RECTANGLE
+            glass.cornerRadius = corner
+            glass.setColor(Color.parseColor(if (blur) "#F2121212" else "#F5151515"))
+            glass.setStroke(dp(1), Theme.alpha(AMBER, 0x55))
+            w.setBackgroundDrawable(glass)
+            if (blur) w.setBackgroundBlurRadius(dp(48))
+            w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            w.setDimAmount(dim)
+            w.setWindowAnimations(android.R.style.Animation_Toast)
+        }
+        dialog.setCanceledOnTouchOutside(true)
+        dialog.show()
+        w?.setLayout(dp(widthDp), WindowManager.LayoutParams.WRAP_CONTENT)
+        w?.setGravity(Gravity.CENTER)
+        if (Build.VERSION.SDK_INT >= 30) w?.insetsController?.hide(WindowInsets.Type.systemBars())
+        root.alpha = 0f
+        root.scaleX = 0.95f; root.scaleY = 0.95f
+        root.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(170).start()
+    }
+
+    /** Centred, minimal selection sheet (replaces the platform PopupMenu). */
     private fun showGlassChoice(title: String, options: List<String>, selectedIndex: Int, onChoose: (Int) -> Unit) {
         if (options.isEmpty()) return
         val dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(12))
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(22).toFloat()
-                setColor(Color.parseColor("#F20D1014"))
-                setStroke(dp(1), Color.parseColor("#40FFFFFF"))
-            }
-        }
-        val heading = TextView(this).apply {
-            text = title.uppercase(Locale.getDefault())
-            setTextColor(AMBER); textSize = 12f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            letterSpacing = 0.08f
-            setPadding(dp(8), dp(4), dp(8), dp(12))
-        }
-        root.addView(heading)
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+
+        val heading = TextView(this)
+        heading.text = title.uppercase(Locale.getDefault())
+        heading.setTextColor(AMBER)
+        heading.textSize = 11f
+        heading.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        heading.letterSpacing = 0.16f
+        heading.gravity = Gravity.CENTER
+        heading.setPadding(dp(16), dp(18), dp(16), dp(14))
+        root.addView(heading, LinearLayout.LayoutParams(MP, WC))
+        root.addView(hairline(), LinearLayout.LayoutParams(MP, 1))
+
+        val list = LinearLayout(this)
+        list.orientation = LinearLayout.VERTICAL
         options.forEachIndexed { index, label ->
-            val selected = index == selectedIndex
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), 0, dp(12), 0)
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dp(12).toFloat()
-                    setColor(if (selected) Color.parseColor("#33FFC23C") else Color.TRANSPARENT)
-                    if (selected) setStroke(dp(1), Color.parseColor("#99FFC23C"))
-                }
-                isClickable = true
-                isFocusable = true
+            val on = index == selectedIndex
+            val row = FrameLayout(this)
+            row.background = if (on) ColorDrawable(Theme.alpha(AMBER, 0x24)) else pressable()
+            row.isClickable = true
+
+            val name = TextView(this)
+            name.text = label
+            name.gravity = Gravity.CENTER
+            name.textSize = 15f
+            name.setTextColor(if (on) AMBER else Color.WHITE)
+            name.typeface = Typeface.create(if (on) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
+            name.setPadding(dp(44), 0, dp(44), 0)   // equal padding both sides keeps the text truly centred
+            row.addView(name, FrameLayout.LayoutParams(MP, MP))
+
+            if (on) {
+                val mark = TextView(this)
+                mark.text = "✓"
+                mark.textSize = 17f
+                mark.setTextColor(AMBER)
+                mark.gravity = Gravity.CENTER
+                val mlp = FrameLayout.LayoutParams(dp(32), MP, Gravity.END or Gravity.CENTER_VERTICAL)
+                mlp.marginEnd = dp(10)
+                row.addView(mark, mlp)
             }
-            val name = TextView(this).apply {
-                text = label
-                textSize = 15f
-                setTextColor(if (selected) AMBER else Color.WHITE)
-                typeface = Typeface.create(if (selected) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
-                setPadding(0, 0, dp(8), 0)
-            }
-            row.addView(name, LinearLayout.LayoutParams(0, dp(46), 1f))
-            val mark = TextView(this).apply {
-                text = if (selected) "✓" else ""
-                textSize = 18f; setTextColor(AMBER); gravity = Gravity.CENTER
-            }
-            row.addView(mark, LinearLayout.LayoutParams(dp(28), dp(46)))
             row.setOnClickListener { dialog.dismiss(); onChoose(index) }
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46))
-            lp.bottomMargin = dp(4)
-            root.addView(row, lp)
+            list.addView(row, LinearLayout.LayoutParams(MP, dp(50)))
+            if (index < options.lastIndex) {
+                val hl = LinearLayout.LayoutParams(MP, 1)
+                hl.marginStart = dp(20); hl.marginEnd = dp(20)
+                list.addView(hairline(), hl)
+            }
         }
-        dialog.setContentView(root)
-        val w = dialog.window
-        w?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        if (Build.VERSION.SDK_INT >= 31 && windowManager.isCrossWindowBlurEnabled) w?.setBackgroundBlurRadius(dp(36))
-        w?.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-        w?.setDimAmount(0.5f)
-        dialog.setCanceledOnTouchOutside(true)
-        dialog.show()
-        w?.setLayout(dp(280), WindowManager.LayoutParams.WRAP_CONTENT)
-        w?.setGravity(Gravity.CENTER)
+        list.measure(
+            View.MeasureSpec.makeMeasureSpec(dp(280), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val maxH = (resources.displayMetrics.heightPixels * 0.5f).toInt()
+        val scroll = ScrollView(this)
+        scroll.isVerticalScrollBarEnabled = false
+        scroll.addView(list)
+        root.addView(scroll, LinearLayout.LayoutParams(MP, minOf(list.measuredHeight, maxH)))
+
+        root.addView(hairline(), LinearLayout.LayoutParams(MP, 1))
+        root.addView(glassButton("Cancel", Color.parseColor("#D9FFFFFF"), false) { dialog.dismiss() }, LinearLayout.LayoutParams(MP, dp(50)))
+        presentGlass(dialog, root, 280)
     }
 
+    /** Pick any interface colour; the whole app follows it live. */
+    private fun showAccentPicker() {
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val vMin = 0.35f
+        val hsv = FloatArray(3)
+        Color.colorToHSV(Theme.accent, hsv)
+        hsv[2] = hsv[2].coerceIn(vMin, 1f)
+        var refresh: () -> Unit = { }
+
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+
+        val heading = TextView(this)
+        heading.text = "INTERFACE COLOR"
+        heading.textSize = 11f
+        heading.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        heading.letterSpacing = 0.16f
+        heading.gravity = Gravity.CENTER
+        heading.setPadding(dp(16), dp(18), dp(16), dp(14))
+        root.addView(heading, LinearLayout.LayoutParams(MP, WC))
+        root.addView(hairline(), LinearLayout.LayoutParams(MP, 1))
+
+        val body = LinearLayout(this)
+        body.orientation = LinearLayout.HORIZONTAL
+        body.setPadding(dp(22), dp(16), dp(22), dp(16))
+
+        // left: preview + presets
+        val left = LinearLayout(this)
+        left.orientation = LinearLayout.VERTICAL
+        left.gravity = Gravity.CENTER_HORIZONTAL
+        val swatch = View(this)
+        left.addView(swatch, LinearLayout.LayoutParams(dp(150), dp(52)))
+        val hexText = TextView(this)
+        hexText.setTextColor(Color.WHITE)
+        hexText.textSize = 13f
+        hexText.typeface = Typeface.MONOSPACE
+        hexText.gravity = Gravity.CENTER
+        hexText.setPadding(0, dp(8), 0, dp(8))
+        left.addView(hexText, LinearLayout.LayoutParams(WC, WC))
+
+        val presets = listOf("#FFC23C", "#FF8A3D", "#FF5252", "#FF5FA2", "#A78BFA", "#4DA3FF", "#3DD6E8", "#4CD964").map { Color.parseColor(it) }
+        val dots = ArrayList<Pair<View, Int>>()
+        for (r in 0..1) {
+            val line = LinearLayout(this)
+            line.orientation = LinearLayout.HORIZONTAL
+            for (k in 0..3) {
+                val pc = presets[r * 4 + k]
+                val dot = View(this)
+                dot.setOnClickListener {
+                    Color.colorToHSV(pc, hsv)
+                    hsv[2] = hsv[2].coerceIn(vMin, 1f)
+                    refresh()
+                }
+                val lp = LinearLayout.LayoutParams(dp(30), dp(30))
+                lp.setMargins(dp(4), dp(4), dp(4), dp(4))
+                line.addView(dot, lp)
+                dots.add(dot to pc)
+            }
+            left.addView(line)
+        }
+        body.addView(left, LinearLayout.LayoutParams(dp(170), WC))
+
+        // right: hue / saturation / brightness
+        val right = LinearLayout(this)
+        right.orientation = LinearLayout.VERTICAL
+        fun barLabel(text: String): TextView {
+            val t = TextView(this)
+            t.text = text
+            t.setTextColor(Color.parseColor("#99FFFFFF"))
+            t.textSize = 11f
+            t.setPadding(dp(4), dp(2), 0, 0)
+            return t
+        }
+        val hueBar = GradientBar(this)
+        val satBar = GradientBar(this)
+        val valBar = GradientBar(this)
+        hueBar.setColors(listOf("#FF0000", "#FFFF00", "#00FF00", "#00FFFF", "#0000FF", "#FF00FF", "#FF0000").map { Color.parseColor(it) }.toIntArray())
+        hueBar.onChange = { p -> hsv[0] = (p * 359.9f); refresh() }
+        satBar.onChange = { p -> hsv[1] = p; refresh() }
+        valBar.onChange = { p -> hsv[2] = vMin + p * (1f - vMin); refresh() }
+        right.addView(barLabel("Hue")); right.addView(hueBar, LinearLayout.LayoutParams(MP, dp(30)))
+        right.addView(barLabel("Saturation")); right.addView(satBar, LinearLayout.LayoutParams(MP, dp(30)))
+        right.addView(barLabel("Brightness")); right.addView(valBar, LinearLayout.LayoutParams(MP, dp(30)))
+        val rlp = LinearLayout.LayoutParams(0, WC, 1f)
+        rlp.marginStart = dp(22)
+        body.addView(right, rlp)
+        root.addView(body)
+
+        root.addView(hairline(), LinearLayout.LayoutParams(MP, 1))
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.addView(glassButton("Reset", Color.parseColor("#D9FFFFFF"), false) {
+            Color.colorToHSV(Theme.DEFAULT, hsv); refresh()
+        }, LinearLayout.LayoutParams(0, dp(52), 1f))
+        row.addView(View(this).also { it.setBackgroundColor(Color.parseColor("#26FFFFFF")) }, LinearLayout.LayoutParams(1, MP))
+        val done = glassButton("Done", AMBER, true) { dialog.dismiss() }
+        row.addView(done, LinearLayout.LayoutParams(0, dp(52), 1f))
+        root.addView(row)
+
+        refresh = {
+            val c = Color.HSVToColor(hsv)
+            if (c != Theme.accent) {
+                Theme.accent = c
+                prefs.edit().putInt("accent", c).apply()
+                applyTheme()
+            }
+            heading.setTextColor(c)
+            done.setTextColor(c)
+            swatch.background = shape(c, 14f, Color.parseColor("#33FFFFFF"), 1f)
+            hexText.text = Theme.hex(c)
+            satBar.setColors(intArrayOf(Color.HSVToColor(floatArrayOf(hsv[0], 0f, hsv[2])), Color.HSVToColor(floatArrayOf(hsv[0], 1f, hsv[2]))))
+            valBar.setColors(intArrayOf(Color.HSVToColor(floatArrayOf(hsv[0], hsv[1], vMin)), Color.HSVToColor(floatArrayOf(hsv[0], hsv[1], 1f))))
+            hueBar.setProgress(hsv[0] / 360f)
+            satBar.setProgress(hsv[1])
+            valBar.setProgress((hsv[2] - vMin) / (1f - vMin))
+            for ((v, pc) in dots) {
+                v.background = shape(pc, 0f, if (near(pc, c)) Color.WHITE else Color.TRANSPARENT, 2f, true)
+            }
+        }
+        refresh()
+        presentGlass(dialog, root, 540, 0.2f)
+    }
+
+    /** Controls sit in a column on the left (Side) or in a row along the top / bottom edge. */
     private fun applyControlPosition() {
         if (!::exposureControls.isInitialized) return
-        val lp = exposureControls.layoutParams as? FrameLayout.LayoutParams ?: return
+        val box = exposureControls as? LinearLayout ?: return
+        val lp = box.layoutParams as? FrameLayout.LayoutParams ?: return
+        val chipsShown = ::zoomChips.isInitialized && zoomChips.visibility == View.VISIBLE
+        val key = controlPosition + "|" + chipsShown
+        if (key == lastLayoutKey) return
+        lastLayoutKey = key
+
+        val horizontal = controlPosition != "Side"
+        box.orientation = if (horizontal) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
         lp.gravity = when (controlPosition) {
             "Top" -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
             "Bottom" -> Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
@@ -928,8 +1168,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         lp.leftMargin = if (controlPosition == "Side") dp(24) else 0
         lp.rightMargin = 0
         lp.topMargin = if (controlPosition == "Top") dp(76) else 0
-        lp.bottomMargin = if (controlPosition == "Bottom") dp(86) else 0
-        exposureControls.layoutParams = lp
+        // keep clear of the zoom levels that live along the bottom edge
+        lp.bottomMargin = if (controlPosition == "Bottom") (if (chipsShown) dp(70) else dp(18)) else 0
+        box.layoutParams = lp
+
+        for (k in 0 until box.childCount) {
+            val child = box.getChildAt(k)
+            val cl = child.layoutParams as? LinearLayout.LayoutParams ?: continue
+            if (horizontal) cl.setMargins(dp(3), 0, dp(3), 0) else cl.setMargins(0, dp(3), 0, dp(3))
+            child.layoutParams = cl
+        }
+        box.requestLayout()
     }
 
     private fun refreshSlider() {
@@ -965,8 +1214,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun styleVerticalAuto(on: Boolean) {
-        btnVerticalAuto.setBackgroundResource(if (on) R.drawable.bg_pill_selected else R.drawable.bg_pill)
-        btnVerticalAuto.setTextColor(if (on) Color.BLACK else Color.WHITE)
+        btnVerticalAuto.background = pillBg(on)
+        btnVerticalAuto.setTextColor(if (on) Theme.onAccent() else Color.WHITE)
         btnVerticalAuto.isSelected = on
         btnVerticalAuto.alpha = if (on) 1f else 0.72f
     }
@@ -1353,14 +1602,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
         val share = ImageView(this)
         share.setImageResource(R.drawable.ic_share)
-        share.setBackgroundResource(R.drawable.bg_pill_round)
+        share.background = shape(Color.parseColor("#B30C0D10"), 0f, Theme.alpha(AMBER, 0x55), 1f, true)
         share.setPadding(dp(7), dp(7), dp(7), dp(7))
         share.setOnClickListener { shareClips(listOf(c)) }
         val slp = FrameLayout.LayoutParams(dp(32), dp(32), Gravity.TOP or Gravity.END)
         slp.setMargins(0, dp(6), dp(6), 0)
 
         val sel = FrameLayout(this)
-        sel.background = shape(Color.parseColor("#33FFC23C"), 12f, AMBER, 3f)
+        sel.background = shape(Theme.alpha(AMBER, 0x33), 12f, AMBER, 3f)
         val chk = TextView(this)
         chk.text = "✓"
         chk.setTextColor(Color.BLACK)
@@ -1577,7 +1826,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             glass.shape = GradientDrawable.RECTANGLE
             glass.cornerRadius = corner
             glass.setColor(Color.parseColor(if (blur) "#F2121212" else "#F5151515"))
-            glass.setStroke(dp(1), Color.parseColor("#33FFFFFF"))
+            glass.setStroke(dp(1), Theme.alpha(AMBER, 0x55))
             w.setBackgroundDrawable(glass)
             if (blur) w.setBackgroundBlurRadius(dp(48))
             w.setDimAmount(0.55f)

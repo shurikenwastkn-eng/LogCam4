@@ -46,7 +46,7 @@ class LevelView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
     override fun onDraw(c: Canvas) {
         if (!show || width == 0) return
         val level = abs(angle) < 1f
-        val col = if (level) Color.parseColor("#4CD964") else Color.WHITE
+        val col = if (level) Theme.accent else Color.WHITE
         main.color = col
         text.color = col
         val cx = width / 2f; val cy = height / 2f
