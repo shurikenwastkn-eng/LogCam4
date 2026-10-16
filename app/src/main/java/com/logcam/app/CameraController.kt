@@ -225,6 +225,13 @@ class CameraController(private val ctx: Context) {
     private fun createSession(hlg: Boolean) {
         val dev = device ?: return
         val s = surface ?: return
+        // A stabilization-mode change rebuilds the camera session. Retire the old
+        // session first so two sessions never compete for the same GL SurfaceTexture.
+        val previous = session
+        session = null
+        try { previous?.stopRepeating() } catch (_: Throwable) {}
+        try { previous?.abortCaptures() } catch (_: Throwable) {}
+        try { previous?.close() } catch (_: Throwable) {}
         try {
             val oc = OutputConfiguration(s)
             if (hlg && Build.VERSION.SDK_INT >= 33) oc.setDynamicRangeProfile(DynamicRangeProfiles.HLG10)
