@@ -439,7 +439,32 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         pillShutter = findViewById(R.id.pillShutter); pillWb = findViewById(R.id.pillWb)
         pillFocus = findViewById(R.id.pillFocus); pillEv = findViewById(R.id.pillEv)
         settingsPanel = findViewById(R.id.settingsPanel)
+        settingsPanel.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, dp(18).toFloat())
+            }
+        }
         settingsPanel.clipToOutline = true
+        val settingsScroll = findViewById<ScrollView>(R.id.settingsPanel).let { panel ->
+            (panel as? ViewGroup)?.let { group ->
+                fun findScroll(v: View): ScrollView? {
+                    if (v is ScrollView) return v
+                    if (v is ViewGroup) for (i in 0 until v.childCount) findScroll(v.getChildAt(i))?.let { return it }
+                    return null
+                }
+                findScroll(group)
+            }
+        }
+        settingsScroll?.apply {
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(12).toFloat())
+                }
+            }
+            clipToOutline = true
+            clipChildren = true
+            clipToPadding = true
+        }
         exposureControls = findViewById(R.id.exposureControls)
         vControlPosition = findViewById(R.id.vControlPosition)
         vAccent = findViewById(R.id.vAccent)
