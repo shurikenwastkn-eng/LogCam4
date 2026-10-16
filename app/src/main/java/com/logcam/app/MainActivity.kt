@@ -439,6 +439,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         pillShutter = findViewById(R.id.pillShutter); pillWb = findViewById(R.id.pillWb)
         pillFocus = findViewById(R.id.pillFocus); pillEv = findViewById(R.id.pillEv)
         settingsPanel = findViewById(R.id.settingsPanel)
+        settingsPanel.clipToOutline = true
         exposureControls = findViewById(R.id.exposureControls)
         vControlPosition = findViewById(R.id.vControlPosition)
         vAccent = findViewById(R.id.vAccent)
@@ -520,17 +521,27 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         // settings sheet
         findViewById<View>(R.id.rowRes).setOnClickListener {
             if (recording) { lockedToast(); return@setOnClickListener }
-            if (modes.isNotEmpty()) {
-                modeIdx = (modeIdx + 1) % modes.size
-                focusX = -1f; clearLock(); defaultShutter(); restartPipeline(); updateAll()
+            showGlassChoice("Resolution / frame rate", modes.map { it.label }, modeIdx) { index ->
+                if (index != modeIdx) {
+                    modeIdx = index
+                    prefs.edit().putString("mode", "${modes[index].w},${modes[index].h},${modes[index].fps}").apply()
+                    focusX = -1f; clearLock(); defaultShutter(); restartPipeline(); updateAll()
+                }
             }
         }
         findViewById<View>(R.id.rowGamut).setOnClickListener {
-            gamutCine = !gamutCine; gl?.useCineGamut = gamutCine; updateAll()
+            val choices = listOf("S-Gamut3.Cine", "S-Gamut3")
+            showGlassChoice("Color gamut", choices, if (gamutCine) 0 else 1) { index ->
+                gamutCine = index == 0
+                gl?.useCineGamut = gamutCine
+                updateAll()
+            }
         }
         findViewById<View>(R.id.rowStab).setOnClickListener {
             if (recording) { lockedToast(); return@setOnClickListener }
-            stabIdx = (stabIdx + 1) % stabOptions.size; pushSettings(); updateAll()
+            showGlassChoice("Stabilization", stabOptions.map { it.second }, stabIdx) { index ->
+                stabIdx = index; pushSettings(); updateAll()
+            }
         }
         findViewById<View>(R.id.rowTen).setOnClickListener {
             if (recording) { lockedToast(); return@setOnClickListener }
@@ -547,16 +558,22 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         findViewById<View>(R.id.rowRot).setOnClickListener {
             if (recording) { lockedToast(); return@setOnClickListener }
             val d = displayRotationDeg()
-            val n = (manualFor(d) + 1) and 3
-            prefs.edit().putInt("rot$d", n).apply()
-            gl?.manualQuarterTurns = n
-            updateRows()
+            val choices = listOf("Auto", "Rotate 90°", "Rotate 180°", "Rotate 270°")
+            showGlassChoice("Fix orientation", choices, manualFor(d)) { index ->
+                prefs.edit().putInt("rot$d", index).apply()
+                gl?.manualQuarterTurns = index
+                updateRows()
+            }
         }
         findViewById<View>(R.id.rowGuide).setOnClickListener {
             showGlassChoice("Frame guide", guides.map { it.first }, guideIdx) { index -> guideIdx = index; updateAll() }
         }
         findViewById<View>(R.id.rowZoomSpeed).setOnClickListener {
-            zoomSpeedIdx = (zoomSpeedIdx + 1) % zoomSpeeds.size; updateAll()
+            showGlassChoice("Zoom speed", zoomSpeedNames.toList(), zoomSpeedIdx) { index ->
+                zoomSpeedIdx = index
+                prefs.edit().putInt("zoomSpeed", index).apply()
+                updateAll()
+            }
         }
         findViewById<View>(R.id.rowGrid).setOnClickListener {
             showGlassChoice("Grid lines", gridNames, gridIdx) { index -> gridIdx = index; updateAll() }
@@ -940,10 +957,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             glass.setColor(Color.parseColor(if (blur) "#F2121212" else "#F5151515"))
             glass.setStroke(dp(1), Theme.alpha(AMBER, 0x55))
             w.setBackgroundDrawable(glass)
-            if (blur) w.setBackgroundBlurRadius(dp(48))
+            if (blur) w.setBackgroundBlurRadius(dp(24))
             w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             w.setDimAmount(dim)
-            w.setWindowAnimations(android.R.style.Animation_Toast)
+            w.setWindowAnimations(0)
         }
         dialog.setCanceledOnTouchOutside(true)
         dialog.show()
@@ -952,7 +969,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         if (Build.VERSION.SDK_INT >= 30) w?.insetsController?.hide(WindowInsets.Type.systemBars())
         root.alpha = 0f
         root.scaleX = 0.95f; root.scaleY = 0.95f
-        root.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(170).start()
+        root.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(100).start()
     }
 
     /** Centred, minimal selection sheet (replaces the platform PopupMenu). */
@@ -1165,9 +1182,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             "Bottom" -> Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             else -> Gravity.START or Gravity.CENTER_VERTICAL
         }
-        lp.leftMargin = if (controlPosition == "Side") dp(24) else 0
+        lp.leftMargin = if (controlPosition == "Side") dp(8) else 0
         lp.rightMargin = 0
-        lp.topMargin = if (controlPosition == "Top") dp(76) else 0
+        lp.topMargin = if (controlPosition == "Top") dp(64) else 0
         // keep clear of the zoom levels that live along the bottom edge
         lp.bottomMargin = if (controlPosition == "Bottom") (if (chipsShown) dp(70) else dp(18)) else 0
         box.layoutParams = lp
