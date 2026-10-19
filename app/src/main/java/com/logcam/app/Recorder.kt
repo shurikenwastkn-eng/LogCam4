@@ -27,6 +27,7 @@ class Recorder(
     private val fps: Int,
     private val tenBit: Boolean,
     private val wantAudio: Boolean,
+    private val rec709Output: Boolean,
     private val nowNs: () -> Long,
     private val startNs: Long
 ) {
@@ -75,7 +76,8 @@ class Recorder(
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
-            setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT2020)
+            setInteger(MediaFormat.KEY_COLOR_STANDARD, if (rec709Output) MediaFormat.COLOR_STANDARD_BT709 else MediaFormat.COLOR_STANDARD_BT2020)
+            if (rec709Output) setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
             setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_FULL)
             if (tenBit) setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10)
         }
