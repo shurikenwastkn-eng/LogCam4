@@ -334,7 +334,7 @@
                 <TextView android:id="@+id/vAudio" style="@style/rowValue" />
             </LinearLayout>
             <LinearLayout android:id="@+id/rowOutputRec709" style="@style/row">
-                <TextView style="@style/rowLabel" android:text="Record / export Rec.709" />
+                <TextView style="@style/rowLabel" android:text="Rec.709 recording output" />
                 <TextView android:id="@+id/vOutputRec709" style="@style/rowValue" />
             </LinearLayout>
 
