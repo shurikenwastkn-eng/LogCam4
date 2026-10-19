@@ -335,7 +335,17 @@
             </LinearLayout>
             <LinearLayout android:id="@+id/rowOutputRec709" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Rec.709 recording output" />
-                <TextView android:id="@+id/vOutputRec709" style="@style/rowValue" />
+                <Switch
+                    android:id="@+id/vOutputRec709"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:showText="true"
+                    android:textOn="709"
+                    android:textOff="LOG"
+                    android:checked="false"
+                    android:contentDescription="Toggle Rec.709 recording output"
+                    android:thumbTint="#FFFFFFFF"
+                    android:trackTint="#66777777" />
             </LinearLayout>
 
                 <TextView style="@style/section" android:tag="accent" android:text="MONITORING" />
@@ -452,7 +462,11 @@
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1">
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:clipToPadding="false"
+            android:overScrollMode="never"
+            android:nestedScrollingEnabled="false">
 
             <LinearLayout
                 android:id="@+id/libraryList"
