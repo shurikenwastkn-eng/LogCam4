@@ -1797,13 +1797,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             }
         }
         var playPause: TextView? = null
-        val prev = playerButton("‹ Prev") { playAt((clipIndex - 1).coerceAtLeast(0)) }
+        var navigateTo: ((Int) -> Unit)? = null
+        val prev = playerButton("‹ Prev") { navigateTo?.invoke((clipIndex - 1).coerceAtLeast(0)) }
         val playPauseButton = playerButton("Ⅱ", true) {
             if (video.isPlaying) { video.pause(); playPause?.text = "▶" }
             else { video.start(); playPause?.text = "Ⅱ" }
         }
         playPause = playPauseButton
-        val next = playerButton("Next ›") { playAt((clipIndex + 1).coerceAtMost(libClips.lastIndex)) }
+        val next = playerButton("Next ›") { navigateTo?.invoke((clipIndex + 1).coerceAtMost(libClips.lastIndex)) }
         val export = playerButton("Export") { exportClips(listOf(currentClip)) }
         actions.addView(prev, LinearLayout.LayoutParams(0, WC, 1f).apply { marginEnd = dp(5) })
         actions.addView(playPauseButton, LinearLayout.LayoutParams(WC, WC).apply { marginEnd = dp(5) })
@@ -1832,10 +1833,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             seek.progress = 0
             video.setVideoURI(currentClip.uri)
         }
-        fun playAt(index: Int) {
-            if (libClips.isEmpty()) return
-            clipIndex = index.coerceIn(0, libClips.lastIndex)
-            updateClipLabel()
+        navigateTo = { index ->
+            if (libClips.isNotEmpty()) {
+                clipIndex = index.coerceIn(0, libClips.lastIndex)
+                updateClipLabel()
+            }
         }
 
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
