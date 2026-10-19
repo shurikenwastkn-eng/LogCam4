@@ -31,6 +31,7 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
     private val main = Handler(Looper.getMainLooper())
 
     @Volatile var monitorRec709 = false
+    @Volatile var recordRec709 = false
     @Volatile var sourceHlg = false
     @Volatile var useCineGamut = true
     @Volatile var evStops = 0f
@@ -257,7 +258,7 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
                 val pts = ts - recStartNs
                 if (pts >= 0) {
                     EGL14.eglMakeCurrent(dpy, es, es, ctx)
-                    draw(encW, encH, false, 0f, computeK(recDisplayDeg, recManual, false))
+                    draw(encW, encH, false, if (recordRec709) 1f else 0f, computeK(recDisplayDeg, recManual, false))
                     EGLExt.eglPresentationTimeANDROID(dpy, es, pts)
                     EGL14.eglSwapBuffers(dpy, es)
                     EGL14.eglMakeCurrent(dpy, previewEgl, previewEgl, ctx)
