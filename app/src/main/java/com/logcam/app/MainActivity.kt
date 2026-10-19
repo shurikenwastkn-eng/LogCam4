@@ -471,6 +471,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun wire() {
+        vOutputRec709.isChecked = outputRec709
         btnRecord.setOnClickListener { dismissCameraControl(); if (recording) stopRecording() else startRecording() }
         btnLibrary.setOnClickListener { dismissCameraControl(); openLibrary() }
         btnLibClose.setOnClickListener { if (selClips.isNotEmpty()) clearSelection() else libraryPanel.visibility = View.GONE }
@@ -1795,16 +1796,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 setOnClickListener { action() }
             }
         }
-        lateinit var playPause: TextView
+        var playPause: TextView? = null
         val prev = playerButton("‹ Prev") { playAt((clipIndex - 1).coerceAtLeast(0)) }
-        playPause = playerButton("Ⅱ", true) {
-            if (video.isPlaying) { video.pause(); playPause.text = "▶" }
-            else { video.start(); playPause.text = "Ⅱ" }
+        val playPauseButton = playerButton("Ⅱ", true) {
+            if (video.isPlaying) { video.pause(); playPause?.text = "▶" }
+            else { video.start(); playPause?.text = "Ⅱ" }
         }
+        playPause = playPauseButton
         val next = playerButton("Next ›") { playAt((clipIndex + 1).coerceAtMost(libClips.lastIndex)) }
         val export = playerButton("Export") { exportClips(listOf(currentClip)) }
         actions.addView(prev, LinearLayout.LayoutParams(0, WC, 1f).apply { marginEnd = dp(5) })
-        actions.addView(playPause, LinearLayout.LayoutParams(WC, WC).apply { marginEnd = dp(5) })
+        actions.addView(playPauseButton, LinearLayout.LayoutParams(WC, WC).apply { marginEnd = dp(5) })
         actions.addView(next, LinearLayout.LayoutParams(0, WC, 1f).apply { marginEnd = dp(5) })
         actions.addView(export)
         bottom.addView(actions)
@@ -1864,7 +1866,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             preparedDuration = player.duration
             totalTime.text = formatPlayerTime(preparedDuration)
             video.start()
-            playPause.text = "Ⅱ"
+            playPause?.text = "Ⅱ"
         }
         video.setOnErrorListener { _, _, _ ->
             Toast.makeText(this, "Couldn't play this recording", Toast.LENGTH_SHORT).show()
