@@ -333,6 +333,10 @@
                 <TextView style="@style/rowLabel" android:text="Audio" />
                 <TextView android:id="@+id/vAudio" style="@style/rowValue" />
             </LinearLayout>
+            <LinearLayout android:id="@+id/rowOutputRec709" style="@style/row">
+                <TextView style="@style/rowLabel" android:text="Record / export Rec.709" />
+                <TextView android:id="@+id/vOutputRec709" style="@style/rowValue" />
+            </LinearLayout>
 
                 <TextView style="@style/section" android:tag="accent" android:text="MONITORING" />
             <LinearLayout android:id="@+id/rowAssist" style="@style/row">
