@@ -54,6 +54,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.VideoView
 import android.widget.Toast
@@ -117,7 +118,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var vTen: TextView
     private lateinit var vAudio: TextView
     private lateinit var vAssist: TextView
-    private lateinit var vOutputRec709: TextView
+    private lateinit var vOutputRec709: Switch
     private lateinit var vRot: TextView
     private lateinit var btnLibrary: ImageView
     private lateinit var libraryPanel: View
@@ -560,13 +561,20 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         findViewById<View>(R.id.rowAssist).setOnClickListener {
             assistPref = !assistPref; gl?.monitorRec709 = assistPref; updateAll()
         }
-        findViewById<View>(R.id.rowOutputRec709).setOnClickListener {
-            if (recording) { lockedToast(); return@setOnClickListener }
-            outputRec709 = !outputRec709
+        vOutputRec709.setOnCheckedChangeListener { _, checked ->
+            if (recording) {
+                vOutputRec709.isChecked = outputRec709
+                lockedToast()
+                return@setOnCheckedChangeListener
+            }
+            outputRec709 = checked
             prefs.edit().putBoolean("outputRec709", outputRec709).apply()
             gl?.recordRec709 = outputRec709
             updateAll()
-            Toast.makeText(this, if (outputRec709) "New recordings will be Rec.709" else "New recordings will be S-Log3", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, if (outputRec709) "New recordings use Rec.709 output" else "New recordings use S-Log3 output", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<View>(R.id.rowOutputRec709).setOnClickListener {
+            if (!recording) vOutputRec709.isChecked = !vOutputRec709.isChecked else lockedToast()
         }
         findViewById<View>(R.id.rowRot).setOnClickListener {
             if (recording) { lockedToast(); return@setOnClickListener }
@@ -884,7 +892,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vTen.text = if (tenBitPref) "On" else "Off"
         vAudio.text = if (audioPref) "On" else "Off"
         vAssist.text = if (assistPref) "On" else "Off"
-        vOutputRec709.text = if (outputRec709) "On · Rec.709" else "Off · S-Log3"
+        if (vOutputRec709.isChecked != outputRec709) vOutputRec709.isChecked = outputRec709
+        vOutputRec709.isEnabled = !recording
         vRot.text = "${manualFor(displayRotationDeg()) * 90}°"
         vGuide.text = guides[guideIdx].first
         vZoomSpeed.text = zoomSpeedNames[zoomSpeedIdx]
@@ -1706,35 +1715,170 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun openClip(uri: Uri) {
-        // Play recordings in LogCam instead of launching an external video app.
+        val startIndex = libClips.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
+        var clipIndex = startIndex
+        var currentClip = libClips.getOrNull(clipIndex) ?: Clip(uri, "Recording.mp4", 0L, 0L, 0L, "")
+        var userSeeking = false
+        var preparedDuration = 0
+
         val dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         val video = VideoView(this)
-        root.addView(video, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        root.addView(video, FrameLayout.LayoutParams(MP, MP))
+
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(18), dp(14), dp(14), dp(14))
+            background = ColorDrawable(Color.parseColor("#CC08090B"))
+        }
+        val title = TextView(this).apply {
+            text = currentClip.name
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        top.addView(title, LinearLayout.LayoutParams(0, WC, 1f))
+        val close = TextView(this).apply {
+            text = "✕"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setPadding(dp(14), dp(4), dp(4), dp(4))
+            contentDescription = "Close video"
+        }
+        top.addView(close, LinearLayout.LayoutParams(WC, dp(44)))
+        root.addView(top, FrameLayout.LayoutParams(MP, WC, Gravity.TOP))
+
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(18))
+            background = ColorDrawable(Color.parseColor("#E6101114"))
+        }
+        val seek = SeekBar(this).apply {
+            max = 1000
+            progressTintList = ColorStateList.valueOf(Color.WHITE)
+            thumbTintList = ColorStateList.valueOf(Color.WHITE)
+            progressBackgroundTintList = ColorStateList.valueOf(Color.parseColor("#777777"))
+            splitTrack = false
+        }
+        bottom.addView(seek, LinearLayout.LayoutParams(MP, dp(32)))
+        val timeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val currentTime = TextView(this).apply { text = "0:00"; setTextColor(Color.WHITE); textSize = 12f }
+        timeRow.addView(currentTime)
+        timeRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        val totalTime = TextView(this).apply { text = "0:00"; setTextColor(Color.parseColor("#B3FFFFFF")); textSize = 12f }
+        timeRow.addView(totalTime)
+        bottom.addView(timeRow, LinearLayout.LayoutParams(MP, WC))
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(10), 0, 0)
+        }
+        fun playerButton(label: String, emphasis: Boolean = false, action: () -> Unit): TextView {
+            return TextView(this).apply {
+                text = label
+                gravity = Gravity.CENTER
+                textSize = if (emphasis) 16f else 13f
+                typeface = Typeface.create(if (emphasis) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
+                setTextColor(if (emphasis) Color.BLACK else Color.WHITE)
+                background = if (emphasis) shape(Color.WHITE, 24f) else shape(Color.parseColor("#292B30"), 20f)
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                isClickable = true
+                setOnClickListener { action() }
+            }
+        }
+        lateinit var playPause: TextView
+        val prev = playerButton("‹ Prev") { playAt((clipIndex - 1).coerceAtLeast(0)) }
+        playPause = playerButton("Ⅱ", true) {
+            if (video.isPlaying) { video.pause(); playPause.text = "▶" }
+            else { video.start(); playPause.text = "Ⅱ" }
+        }
+        val next = playerButton("Next ›") { playAt((clipIndex + 1).coerceAtMost(libClips.lastIndex)) }
+        val export = playerButton("Export") { exportClips(listOf(currentClip)) }
+        actions.addView(prev, LinearLayout.LayoutParams(0, WC, 1f).apply { marginEnd = dp(5) })
+        actions.addView(playPause, LinearLayout.LayoutParams(WC, WC).apply { marginEnd = dp(5) })
+        actions.addView(next, LinearLayout.LayoutParams(0, WC, 1f).apply { marginEnd = dp(5) })
+        actions.addView(export)
+        bottom.addView(actions)
+        root.addView(bottom, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
+
+        val tick = object : Runnable {
+            override fun run() {
+                if (!dialog.isShowing) return
+                val duration = if (preparedDuration > 0) preparedDuration else video.duration.coerceAtLeast(0)
+                val position = video.currentPosition.coerceAtLeast(0)
+                if (!userSeeking && duration > 0) seek.progress = ((position.toLong() * 1000L) / duration).toInt().coerceIn(0, 1000)
+                currentTime.text = formatPlayerTime(position)
+                totalTime.text = formatPlayerTime(duration)
+                ui.postDelayed(this, 200)
+            }
+        }
+
+        fun updateClipLabel() {
+            currentClip = libClips.getOrNull(clipIndex) ?: currentClip
+            title.text = currentClip.name
+            preparedDuration = currentClip.durMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            totalTime.text = formatPlayerTime(preparedDuration)
+            seek.progress = 0
+            video.setVideoURI(currentClip.uri)
+        }
+        fun playAt(index: Int) {
+            if (libClips.isEmpty()) return
+            clipIndex = index.coerceIn(0, libClips.lastIndex)
+            updateClipLabel()
+        }
+
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser && preparedDuration > 0) {
+                    currentTime.text = formatPlayerTime((preparedDuration.toLong() * progress / 1000L).toInt())
+                }
+            }
+            override fun onStartTrackingTouch(bar: SeekBar?) { userSeeking = true }
+            override fun onStopTrackingTouch(bar: SeekBar?) {
+                if (preparedDuration > 0) video.seekTo((preparedDuration.toLong() * seek.progress / 1000L).toInt())
+                userSeeking = false
+            }
+        })
+        close.setOnClickListener { dialog.dismiss() }
         dialog.setContentView(root)
-        dialog.setOnDismissListener { try { video.stopPlayback() } catch (_: Throwable) {} }
+        dialog.setOnDismissListener {
+            ui.removeCallbacks(tick)
+            try { video.stopPlayback() } catch (_: Throwable) {}
+        }
         dialog.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.BLACK))
             setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
             addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
-        val controls = android.widget.MediaController(this)
-        controls.setAnchorView(video)
-        video.setMediaController(controls)
-        video.setVideoURI(uri)
         video.setOnPreparedListener { player ->
             player.isLooping = false
+            preparedDuration = player.duration
+            totalTime.text = formatPlayerTime(preparedDuration)
             video.start()
-            controls.show(2500)
+            playPause.text = "Ⅱ"
         }
         video.setOnErrorListener { _, _, _ ->
             Toast.makeText(this, "Couldn't play this recording", Toast.LENGTH_SHORT).show()
-            dialog.dismiss()
             true
         }
+        video.setVideoURI(currentClip.uri)
         dialog.show()
         dialog.window?.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
+        ui.post(tick)
+    }
+
+    private fun formatPlayerTime(ms: Int): String {
+        val seconds = ms.coerceAtLeast(0) / 1000
+        return String.format(Locale.US, "%d:%02d", seconds / 60, seconds % 60)
     }
 
     private fun shareClips(list: List<Clip>) {
