@@ -55,6 +55,7 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.VideoView
 import android.widget.Toast
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -116,6 +117,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var vTen: TextView
     private lateinit var vAudio: TextView
     private lateinit var vAssist: TextView
+    private lateinit var vOutputRec709: TextView
     private lateinit var vRot: TextView
     private lateinit var btnLibrary: ImageView
     private lateinit var libraryPanel: View
@@ -204,6 +206,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private var tenBitPref = true
     private var audioPref = true
     private var assistPref = false
+    private var outputRec709 = false
     private var autoExp = true
     private var autoFocus = true
     private var isoProgress = 20
@@ -335,6 +338,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         val g = GlPipeline(preview.holder.surface, tenBitPref)
         gl = g
         g.monitorRec709 = assistPref
+        g.recordRec709 = outputRec709
         g.useCineGamut = gamutCine
         g.evStops = (evProgress - 12) / 4f
         g.displayRotationDeg = displayRotationDeg()
@@ -445,7 +449,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vAccent = findViewById(R.id.vAccent)
         vRes = findViewById(R.id.vRes); vGamut = findViewById(R.id.vGamut); vStab = findViewById(R.id.vStab)
         vTen = findViewById(R.id.vTen); vAudio = findViewById(R.id.vAudio)
-        vAssist = findViewById(R.id.vAssist); vRot = findViewById(R.id.vRot)
+        vAssist = findViewById(R.id.vAssist); vOutputRec709 = findViewById(R.id.vOutputRec709); vRot = findViewById(R.id.vRot)
         btnLibrary = findViewById(R.id.btnLibrary); libraryPanel = findViewById(R.id.libraryPanel)
         libraryList = findViewById(R.id.libraryList); tvLibEmpty = findViewById(R.id.tvLibEmpty)
         btnLibClose = findViewById(R.id.btnLibClose)
@@ -508,6 +512,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         pillIso.setOnClickListener { toggleSel(Sel.ISO) }
         pillShutter.setOnClickListener { toggleSel(Sel.SS) }
         pillFocus.setOnClickListener { toggleSel(Sel.FOCUS) }
+        pillEv.setOnClickListener { toggleSel(Sel.EV) }
         tvAuto.setOnClickListener { toggleAutoForSelection() }
 
         sbMain.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -554,6 +559,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         }
         findViewById<View>(R.id.rowAssist).setOnClickListener {
             assistPref = !assistPref; gl?.monitorRec709 = assistPref; updateAll()
+        }
+        findViewById<View>(R.id.rowOutputRec709).setOnClickListener {
+            if (recording) { lockedToast(); return@setOnClickListener }
+            outputRec709 = !outputRec709
+            prefs.edit().putBoolean("outputRec709", outputRec709).apply()
+            gl?.recordRec709 = outputRec709
+            updateAll()
+            Toast.makeText(this, if (outputRec709) "New recordings will be Rec.709" else "New recordings will be S-Log3", Toast.LENGTH_SHORT).show()
         }
         findViewById<View>(R.id.rowRot).setOnClickListener {
             if (recording) { lockedToast(); return@setOnClickListener }
@@ -871,6 +884,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vTen.text = if (tenBitPref) "On" else "Off"
         vAudio.text = if (audioPref) "On" else "Off"
         vAssist.text = if (assistPref) "On" else "Off"
+        vOutputRec709.text = if (outputRec709) "On · Rec.709" else "Off · S-Log3"
         vRot.text = "${manualFor(displayRotationDeg()) * 90}°"
         vGuide.text = guides[guideIdx].first
         vZoomSpeed.text = zoomSpeedNames[zoomSpeedIdx]
@@ -1397,6 +1411,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         tenBitPref = prefs.getBoolean("ten", true) && supportsMain10()
         audioPref = prefs.getBoolean("audio", true)
         assistPref = prefs.getBoolean("assist", false)
+        outputRec709 = prefs.getBoolean("outputRec709", false)
         guideIdx = prefs.getInt("guide", 0).coerceIn(0, guides.size - 1)
         zoomSpeedIdx = prefs.getInt("zoomSpeed", 1).coerceIn(0, zoomSpeeds.size - 1)
         gridIdx = prefs.getInt("grid", 0).coerceIn(0, gridNames.size - 1)
@@ -1422,6 +1437,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             .putBoolean("ten", tenBitPref)
             .putBoolean("audio", audioPref)
             .putBoolean("assist", assistPref)
+            .putBoolean("outputRec709", outputRec709)
             .putInt("guide", guideIdx)
             .putInt("zoomSpeed", zoomSpeedIdx)
             .putInt("grid", gridIdx)
@@ -1690,11 +1706,35 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun openClip(uri: Uri) {
-        val i = Intent(Intent.ACTION_VIEW)
-        i.setDataAndType(uri, "video/*")
-        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        try { startActivity(Intent.createChooser(i, "Open with")) }
-        catch (t: Throwable) { Toast.makeText(this, "No app found to play this video", Toast.LENGTH_SHORT).show() }
+        // Play recordings in LogCam instead of launching an external video app.
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val video = VideoView(this)
+        root.addView(video, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        dialog.setContentView(root)
+        dialog.setOnDismissListener { try { video.stopPlayback() } catch (_: Throwable) {} }
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.BLACK))
+            setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
+            addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        val controls = android.widget.MediaController(this)
+        controls.setAnchorView(video)
+        video.setMediaController(controls)
+        video.setVideoURI(uri)
+        video.setOnPreparedListener { player ->
+            player.isLooping = false
+            video.start()
+            controls.show(2500)
+        }
+        video.setOnErrorListener { _, _, _ ->
+            Toast.makeText(this, "Couldn't play this recording", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+            true
+        }
+        dialog.show()
+        dialog.window?.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
     }
 
     private fun shareClips(list: List<Clip>) {
