@@ -378,7 +378,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         val nowFn: () -> Long = if (realtime) { { SystemClock.elapsedRealtimeNanos() } } else { { System.nanoTime() } }
         val t0 = nowFn()
         val audio = audioPref && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        val rec = Recorder(this, mode.w, mode.h, mode.fps, g.isTenBit, audio, nowFn, t0)
+        val rec = Recorder(this, mode.w, mode.h, mode.fps, g.isTenBit, audio, outputRec709, nowFn, t0)
         try {
             rec.prepare()
             rec.start()
