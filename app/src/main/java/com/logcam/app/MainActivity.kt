@@ -1789,6 +1789,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(10), 0, 0)
         }
+        var scheduleHideControls: () -> Unit = {}
         fun playerButton(label: String, emphasis: Boolean = false, action: () -> Unit): TextView {
             return TextView(this).apply {
                 text = label
@@ -1837,7 +1838,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         bottom.addView(actions)
         root.addView(bottom, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
 
-        fun scheduleHideControls() {
+        scheduleHideControls = {
             hideControlsRunnable?.let { ui.removeCallbacks(it) }
             if (video.isPlaying) {
                 hideControlsRunnable = Runnable {
