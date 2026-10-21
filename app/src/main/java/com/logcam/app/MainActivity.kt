@@ -1805,15 +1805,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             splitTrack = false
         }
         bottom.addView(seek, LinearLayout.LayoutParams(MP, dp(22)))
-        val timeRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
         val currentTime = TextView(this).apply { text = "0:00"; setTextColor(Color.WHITE); textSize = 12f }
-        timeRow.addView(currentTime)
-        timeRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         val totalTime = TextView(this).apply { text = "0:00"; setTextColor(Theme.accent); textSize = 12f }
-        timeRow.addView(totalTime)
         // Time labels sit beside the compact playback controls below the timeline.
 
         val actions = LinearLayout(this).apply {
