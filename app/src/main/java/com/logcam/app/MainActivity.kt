@@ -1735,6 +1735,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         var preparedDuration = 0
         var controlsVisible = true
         var playbackSpeed = 1f
+        var activeMediaPlayer: android.media.MediaPlayer? = null
         var hideControlsRunnable: Runnable? = null
 
         val dialog = Dialog(this)
@@ -1833,7 +1834,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         val speedButton = playerButton("1×") {
             playbackSpeed = when (playbackSpeed) { 0.5f -> 1f; 1f -> 1.5f; 1.5f -> 2f; else -> 0.5f }
             speedButtonLabel?.text = "${playbackSpeed}×".replace(".0×", "×")
-            try { video.setPlaybackParams(android.media.PlaybackParams().setSpeed(playbackSpeed)) } catch (_: Throwable) {}
+            try { activeMediaPlayer?.playbackParams = android.media.PlaybackParams().setSpeed(playbackSpeed) } catch (_: Throwable) {}
         }
         speedButtonLabel = speedButton
         val export = playerButton("Export") { exportClips(listOf(currentClip)) }
@@ -1929,6 +1930,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
         video.setOnPreparedListener { player ->
+            activeMediaPlayer = player
             player.isLooping = false
             preparedDuration = player.duration
             totalTime.text = formatPlayerTime(preparedDuration)
