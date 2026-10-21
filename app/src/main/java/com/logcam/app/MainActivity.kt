@@ -50,6 +50,7 @@ import android.view.Window
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.ImageView
+import android.widget.HorizontalScrollView
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupMenu
@@ -1747,8 +1748,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), dp(14), dp(14), dp(14))
-            background = ColorDrawable(Theme.alpha(Color.parseColor("#101116"), 0xE8))
+            setPadding(dp(14), dp(6), dp(8), dp(6))
+            background = ColorDrawable(Theme.alpha(Color.BLACK, 0xB8))
         }
         val title = TextView(this).apply {
             text = currentClip.name
@@ -1772,8 +1773,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(14), dp(18), dp(18))
-            background = ColorDrawable(Theme.alpha(Color.parseColor("#101116"), 0xED))
+            setPadding(dp(12), dp(6), dp(12), dp(8))
+            background = ColorDrawable(Theme.alpha(Color.BLACK, 0xC8))
         }
         val seek = SeekBar(this).apply {
             max = 1000
@@ -1782,7 +1783,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             progressBackgroundTintList = ColorStateList.valueOf(Theme.alpha(Color.WHITE, 0x38))
             splitTrack = false
         }
-        bottom.addView(seek, LinearLayout.LayoutParams(MP, dp(32)))
+        bottom.addView(seek, LinearLayout.LayoutParams(MP, dp(22)))
         val timeRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1797,7 +1798,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(10), 0, 0)
+            setPadding(0, dp(4), 0, 0)
         }
         var scheduleHideControls: () -> Unit = {}
         fun playerButton(label: String, emphasis: Boolean = false, action: () -> Unit): TextView {
@@ -1839,12 +1840,36 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         speedButtonLabel = speedButton
         val export = playerButton("Export") { exportClips(listOf(currentClip)) }
         val share = playerButton("Share") { shareClips(listOf(currentClip)) }
-        actions.addView(prev, LinearLayout.LayoutParams(0, WC, 1f).apply { marginEnd = dp(4) })
-        actions.addView(playPauseButton, LinearLayout.LayoutParams(WC, WC).apply { marginEnd = dp(4) })
-        actions.addView(next, LinearLayout.LayoutParams(0, WC, 1f).apply { marginEnd = dp(4) })
-        actions.addView(speedButton, LinearLayout.LayoutParams(WC, WC).apply { marginEnd = dp(4) })
-        actions.addView(share, LinearLayout.LayoutParams(WC, WC).apply { marginEnd = dp(4) })
-        actions.addView(export)
+        actions.addView(playPauseButton, LinearLayout.LayoutParams(dp(42), dp(38)).apply { marginEnd = dp(8) })
+        actions.addView(currentTime, LinearLayout.LayoutParams(WC, WC).apply { marginEnd = dp(4) })
+        actions.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        actions.addView(totalTime, LinearLayout.LayoutParams(WC, WC).apply { marginEnd = dp(8) })
+        actions.addView(speedButton, LinearLayout.LayoutParams(dp(48), dp(36)).apply { marginEnd = dp(6) })
+        actions.addView(share, LinearLayout.LayoutParams(dp(54), dp(36)).apply { marginEnd = dp(6) })
+        actions.addView(export, LinearLayout.LayoutParams(dp(58), dp(36)))
+        val filmstripScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            setPadding(0, dp(4), 0, dp(2))
+        }
+        val filmstrip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        libClips.forEachIndexed { index, clip ->
+            val thumb = ImageView(this).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = shape(Color.parseColor("#25262B"), 5f)
+                clipToOutline = true
+                contentDescription = clip.name
+                alpha = if (index == clipIndex) 1f else 0.72f
+            }
+            filmstrip.addView(thumb, LinearLayout.LayoutParams(dp(62), dp(38)).apply { marginEnd = dp(5) })
+            thumbPool.execute {
+                val bitmap = try { contentResolver.loadThumbnail(clip.uri, Size(160, 90), null) } catch (_: Throwable) { null }
+                if (bitmap != null) runOnUiThread { thumb.setImageBitmap(bitmap) }
+            }
+            thumb.setOnClickListener { navigateTo?.invoke(index) }
+        }
+        filmstripScroll.addView(filmstrip)
+        bottom.addView(filmstripScroll, LinearLayout.LayoutParams(MP, dp(44)))
         bottom.addView(actions)
         root.addView(bottom, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
 
