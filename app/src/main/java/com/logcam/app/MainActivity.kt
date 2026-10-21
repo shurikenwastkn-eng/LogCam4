@@ -1793,7 +1793,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         timeRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         val totalTime = TextView(this).apply { text = "0:00"; setTextColor(Theme.accent); textSize = 12f }
         timeRow.addView(totalTime)
-        bottom.addView(timeRow, LinearLayout.LayoutParams(MP, WC))
+        // Time labels sit beside the compact playback controls below the timeline.
 
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
