@@ -34,6 +34,7 @@ import android.os.SystemClock
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Size
+import android.util.Log
 import android.text.TextUtils
 import android.view.GestureDetector
 import android.view.Gravity
@@ -1942,13 +1943,29 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             }
         }
 
+        fun loadClip(uri: Uri) {
+            preparedDuration = 0
+            activeMediaPlayer = null
+            seek.progress = 0
+            currentTime.text = "0:00"
+            totalTime.text = "0:00"
+            playPause?.text = "▶"
+            try { video.stopPlayback() } catch (t: Throwable) {
+                Log.w("LogCamGallery", "Could not stop previous clip cleanly", t)
+            }
+            try { video.setVideoURI(uri) } catch (t: Throwable) {
+                Log.e("LogCamGallery", "Failed to open gallery video URI: $uri", t)
+                Toast.makeText(this, "Couldn't open this recording. Try another video.", Toast.LENGTH_LONG).show()
+            }
+        }
+
         fun updateClipLabel() {
             currentClip = libClips.getOrNull(clipIndex) ?: currentClip
             title.text = currentClip.name
-            preparedDuration = currentClip.durMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-            totalTime.text = formatPlayerTime(preparedDuration)
+            preparedDuration = 0
+            totalTime.text = formatPlayerTime(currentClip.durMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
             seek.progress = 0
-            video.setVideoURI(currentClip.uri)
+            loadClip(currentClip.uri)
         }
         navigateTo = { index ->
             if (libClips.isNotEmpty()) {
@@ -1982,23 +1999,44 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
         video.setOnPreparedListener { player ->
-            activeMediaPlayer = player
-            player.isLooping = false
-            preparedDuration = player.duration
-            totalTime.text = formatPlayerTime(preparedDuration)
-            try { player.playbackParams = android.media.PlaybackParams().setSpeed(playbackSpeed) } catch (_: Throwable) {}
-            video.start()
-            playPause?.text = "Ⅱ"
-            scheduleHideControls()
+            try {
+                activeMediaPlayer = player
+                player.isLooping = false
+                preparedDuration = player.duration.coerceAtLeast(0)
+                totalTime.text = formatPlayerTime(preparedDuration)
+                try { player.playbackParams = android.media.PlaybackParams().setSpeed(playbackSpeed) } catch (t: Throwable) {
+                    Log.w("LogCamGallery", "Playback speed unavailable on this device", t)
+                }
+                video.start()
+                playPause?.text = "Ⅱ"
+                scheduleHideControls()
+            } catch (t: Throwable) {
+                Log.e("LogCamGallery", "Failed while preparing gallery video", t)
+                Toast.makeText(this, "Couldn't start this recording.", Toast.LENGTH_LONG).show()
+            }
         }
-        video.setOnErrorListener { _, _, _ ->
-            Toast.makeText(this, "Couldn't play this recording", Toast.LENGTH_SHORT).show()
+        video.setOnErrorListener { _, what, extra ->
+            Log.e("LogCamGallery", "VideoView playback error what=$what extra=$extra uri=${currentClip.uri}")
+            activeMediaPlayer = null
+            preparedDuration = 0
+            playPause?.text = "▶"
+            Toast.makeText(this, "Couldn't play this recording. Try another clip.", Toast.LENGTH_LONG).show()
             true
         }
-        video.setVideoURI(currentClip.uri)
+        video.setOnCompletionListener {
+            hideControlsRunnable?.let { ui.removeCallbacks(it) }
+            controlsVisible = true
+            top.visibility = View.VISIBLE
+            bottom.visibility = View.VISIBLE
+            top.alpha = 1f
+            bottom.alpha = 1f
+            playPause?.text = "▶"
+        }
         dialog.show()
         dialog.window?.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
         root.setOnClickListener { if (!controlsVisible) showControls() }
+        // Attach the dialog and its VideoView to a window before opening the URI.
+        loadClip(currentClip.uri)
         ui.post(tick)
     }
 
