@@ -313,6 +313,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         applyDisplayRotation()
+        if (::libraryPanel.isInitialized && libraryPanel.visibility == View.VISIBLE) buildGrid(libClips)
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) { surfaceReady = true; startPipeline() }
@@ -474,7 +475,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vOutputRec709.isChecked = outputRec709
         btnRecord.setOnClickListener { dismissCameraControl(); if (recording) stopRecording() else startRecording() }
         btnLibrary.setOnClickListener { dismissCameraControl(); openLibrary() }
-        btnLibClose.setOnClickListener { if (selClips.isNotEmpty()) clearSelection() else libraryPanel.visibility = View.GONE }
+        btnLibClose.setOnClickListener {
+            if (selClips.isNotEmpty()) clearSelection()
+            else {
+                libraryPanel.visibility = View.GONE
+                requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }
+        }
         btnLibShare.setOnClickListener { shareClips(selClips.values.toList()) }
         btnLibExport.setOnClickListener { exportClips(selClips.values.toList()) }
         btnLibDelete.setOnClickListener { confirmDelete(selClips.values.toList()) }
@@ -1547,6 +1554,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun openLibrary() {
+        // The camera stays landscape, but the library can rotate freely for browsing.
+        requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
         val perm = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_VIDEO else Manifest.permission.READ_EXTERNAL_STORAGE
         if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED && !prefs.getBoolean("libAsked", false)) {
             prefs.edit().putBoolean("libAsked", true).apply()
