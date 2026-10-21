@@ -2137,7 +2137,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     override fun onBackPressed() {
         when {
             settingsPanel.visibility == View.VISIBLE -> settingsPanel.visibility = View.GONE
-            libraryPanel.visibility == View.VISIBLE -> if (selClips.isNotEmpty()) clearSelection() else libraryPanel.visibility = View.GONE
+            libraryPanel.visibility == View.VISIBLE -> {
+                if (selClips.isNotEmpty()) clearSelection()
+                else {
+                    libraryPanel.visibility = View.GONE
+                    requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                }
+            }
             else -> super.onBackPressed()
         }
     }
