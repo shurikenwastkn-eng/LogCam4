@@ -623,6 +623,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             if (levelOn) registerLevel() else { sensors.unregisterListener(levelListener); gravInit = false; levelView.visibility = View.GONE }
             updateAll()
         }
+        findViewById<View>(R.id.rowCheckUpdates).setOnClickListener { checkForUpdates(manual = true) }
     }
 
     private fun toggleSel(s: Sel) {
@@ -1497,46 +1498,65 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     // ------------------------------------------------------------------ recordings library
-    private fun checkForUpdates() {
+    private fun checkForUpdates(manual: Boolean = false) {
         val now = SystemClock.elapsedRealtime()
-        if (updateCheckInFlight || (lastUpdateCheckAt != 0L && now - lastUpdateCheckAt < 5 * 60 * 1000L)) return
+        if (updateCheckInFlight) {
+            if (manual) Toast.makeText(this, "Already checking for updates…", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!manual && lastUpdateCheckAt != 0L && now - lastUpdateCheckAt < 5 * 60 * 1000L) return
         lastUpdateCheckAt = now
         updateCheckInFlight = true
+        if (manual) Toast.makeText(this, "Checking for updates…", Toast.LENGTH_SHORT).show()
         Thread {
             var connection: HttpURLConnection? = null
+            var updateAvailable = false
+            var remoteVersion = ""
+            var releaseUrl = "https://github.com/shurikenwastkn-eng/LogCam4/releases/latest"
+            var failure: String? = null
             try {
                 connection = (URL("https://api.github.com/repos/shurikenwastkn-eng/LogCam4/releases/latest").openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 5000
-                    readTimeout = 5000
+                    connectTimeout = 7000
+                    readTimeout = 7000
                     requestMethod = "GET"
                     setRequestProperty("Accept", "application/vnd.github+json")
                     setRequestProperty("User-Agent", "LogCam-Android")
                 }
-                if (connection.responseCode != HttpURLConnection.HTTP_OK) return@Thread
-                val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-                val tag = json.optString("tag_name", "")
-                val remoteVersion = tag.removePrefix("v")
-                val releaseUrl = json.optString("html_url", "https://github.com/shurikenwastkn-eng/LogCam4/releases")
-                if (tag.isBlank() || !isVersionNewer(remoteVersion, (packageManager.getPackageInfo(packageName, 0).versionName ?: "0.1"))) return@Thread
-                runOnUiThread {
-                    val lastPrompted = prefs.getString("lastUpdatePrompted", "")
-                    if (lastPrompted == tag || isFinishing || isDestroyed) return@runOnUiThread
-                    prefs.edit().putString("lastUpdatePrompted", tag).apply()
-                    glassDialog(
-                        title = "LogCam update available",
-                        message = "Version $remoteVersion is ready. Open the release page to download and install it.",
-                        confirmText = "View update",
-                        cancelText = "Later"
-                    ) {
-                        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl))) }
-                        catch (_: Throwable) { Toast.makeText(this, "Couldn't open the release page", Toast.LENGTH_SHORT).show() }
-                    }
+                if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                    failure = "Couldn't check GitHub right now. Try again later."
+                } else {
+                    val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    val tag = json.optString("tag_name", "")
+                    remoteVersion = tag.removePrefix("v")
+                    releaseUrl = json.optString("html_url", releaseUrl)
+                    val localVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: "0.1"
+                    updateAvailable = tag.isNotBlank() && isVersionNewer(remoteVersion, localVersion)
                 }
             } catch (_: Throwable) {
-                // Offline, GitHub unavailable, or no published release: keep the camera usable.
+                failure = "Couldn't check for updates. Check your internet connection and try again."
             } finally {
                 connection?.disconnect()
                 updateCheckInFlight = false
+            }
+            if (!manual && !updateAvailable) return@Thread
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when {
+                    failure != null -> Toast.makeText(this, failure, Toast.LENGTH_LONG).show()
+                    updateAvailable -> {
+                        prefs.edit().putString("lastUpdatePrompted", "v$remoteVersion").apply()
+                        glassDialog(
+                            title = "LogCam update available",
+                            message = "Version $remoteVersion is ready. Open the release page to download and install it.",
+                            confirmText = "Download update",
+                            cancelText = "Later"
+                        ) {
+                            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl))) }
+                            catch (_: Throwable) { Toast.makeText(this, "Couldn't open the release page", Toast.LENGTH_SHORT).show() }
+                        }
+                    }
+                    else -> Toast.makeText(this, "You're up to date.", Toast.LENGTH_SHORT).show()
+                }
             }
         }.start()
     }
@@ -1906,12 +1926,19 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         val tick = object : Runnable {
             override fun run() {
                 if (!dialog.isShowing) return
-                val duration = if (preparedDuration > 0) preparedDuration else video.duration.coerceAtLeast(0)
-                val position = video.currentPosition.coerceAtLeast(0)
-                if (!userSeeking && duration > 0) seek.progress = ((position.toLong() * 1000L) / duration).toInt().coerceIn(0, 1000)
-                currentTime.text = formatPlayerTime(position)
-                totalTime.text = formatPlayerTime(duration)
-                ui.postDelayed(this, 200)
+                // VideoView throws IllegalStateException if queried before its MediaPlayer is prepared
+                // (and briefly while a new clip is being opened). Keep the UI timer crash-safe.
+                try {
+                    if (preparedDuration > 0) {
+                        val position = video.currentPosition.coerceAtLeast(0)
+                        if (!userSeeking) seek.progress = ((position.toLong() * 1000L) / preparedDuration).toInt().coerceIn(0, 1000)
+                        currentTime.text = formatPlayerTime(position)
+                        totalTime.text = formatPlayerTime(preparedDuration)
+                    }
+                } catch (_: IllegalStateException) {
+                    // Wait for the next tick after playback becomes ready.
+                }
+                if (dialog.isShowing) ui.postDelayed(this, 200)
             }
         }
 

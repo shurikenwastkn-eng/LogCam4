@@ -387,6 +387,15 @@
                 <TextView style="@style/rowLabel" android:text="Fix orientation" />
                 <TextView android:id="@+id/vRot" style="@style/rowValue" />
             </LinearLayout>
+
+                <TextView style="@style/section" android:tag="accent" android:text="APP" />
+            <LinearLayout android:id="@+id/rowCheckUpdates" style="@style/row">
+                <TextView style="@style/rowLabel" android:text="Check for updates" />
+                <TextView
+                    android:id="@+id/vCheckUpdates"
+                    style="@style/rowValue"
+                    android:text="Check now" />
+            </LinearLayout>
             </LinearLayout>
         </ScrollView>
     </LinearLayout>
