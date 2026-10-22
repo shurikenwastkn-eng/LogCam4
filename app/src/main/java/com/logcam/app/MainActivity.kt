@@ -31,6 +31,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.StatFs
+import android.os.Environment
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Size
@@ -120,6 +122,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var vTen: TextView
     private lateinit var vAudio: TextView
     private lateinit var vAssist: TextView
+    private lateinit var vProfile: TextView
+    private lateinit var vMonitorTools: TextView
     private lateinit var vOutputRec709: Switch
     private lateinit var vRot: TextView
     private lateinit var btnLibrary: ImageView
@@ -147,6 +151,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private var gridIdx = 0
     private val gridNames = listOf("Off", "Rule of thirds", "Thirds + diagonals", "Square grid", "Square grid + diagonals", "Center cross")
     private var levelOn = false
+    private var profileIdx = 0
+    private var monitorToolIdx = 0
+    private val profileNames = listOf("Custom", "Cinematic 24", "Run & gun 30", "Slow motion 60", "Low light 24")
+    private val monitorToolNames = listOf("Off", "Zebras (90%)", "False colour", "Focus peaking")
 
     private val selClips = LinkedHashMap<Uri, Clip>()
     private val libSel = HashMap<Uri, View>()
@@ -346,6 +354,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         gl = g
         g.previewPaused = ::libraryPanel.isInitialized && libraryPanel.visibility == View.VISIBLE
         g.monitorRec709 = assistPref
+        g.monitorTools = monitorToolIdx
         g.recordRec709 = outputRec709
         g.useCineGamut = gamutCine
         g.evStops = (evProgress - 12) / 4f
@@ -457,7 +466,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vAccent = findViewById(R.id.vAccent)
         vRes = findViewById(R.id.vRes); vGamut = findViewById(R.id.vGamut); vStab = findViewById(R.id.vStab)
         vTen = findViewById(R.id.vTen); vAudio = findViewById(R.id.vAudio)
-        vAssist = findViewById(R.id.vAssist); vOutputRec709 = findViewById(R.id.vOutputRec709); vRot = findViewById(R.id.vRot)
+        vAssist = findViewById(R.id.vAssist); vProfile = findViewById(R.id.vProfile)
+        vMonitorTools = findViewById(R.id.vMonitorTools)
+        vOutputRec709 = findViewById(R.id.vOutputRec709); vRot = findViewById(R.id.vRot)
         btnLibrary = findViewById(R.id.btnLibrary); libraryPanel = findViewById(R.id.libraryPanel)
         // Keep the library clear of the camera cutout / system bars now that the app is edge-to-edge.
         libraryPanel.setOnApplyWindowInsetsListener { v, ins ->
@@ -587,6 +598,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         findViewById<View>(R.id.rowAssist).setOnClickListener {
             assistPref = !assistPref; gl?.monitorRec709 = assistPref; updateAll()
         }
+        findViewById<View>(R.id.rowProfile).setOnClickListener {
+            showGlassChoice("Camera profile", profileNames, profileIdx) { index -> applyCameraProfile(index) }
+        }
+        findViewById<View>(R.id.rowMonitorTools).setOnClickListener {
+            showGlassChoice("Exposure / focus assist", monitorToolNames, monitorToolIdx) { index ->
+                monitorToolIdx = index
+                prefs.edit().putInt("monitorTools", index).apply()
+                gl?.monitorTools = index
+                updateAll()
+            }
+        }
         vOutputRec709.setOnCheckedChangeListener { _, checked ->
             if (recording) {
                 vOutputRec709.isChecked = outputRec709
@@ -641,6 +663,35 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             updateAll()
         }
         findViewById<View>(R.id.rowCheckUpdates).setOnClickListener { checkForUpdates(manual = true) }
+    }
+
+    private fun applyCameraProfile(index: Int) {
+        if (recording) { lockedToast(); return }
+        profileIdx = index.coerceIn(0, profileNames.lastIndex)
+        if (profileIdx == 0) {
+            prefs.edit().putInt("profile", profileIdx).apply()
+            updateAll()
+            return
+        }
+        val targetFps = when (profileIdx) { 1, 4 -> 24; 2 -> 30; else -> 60 }
+        val preferredMode = modes.indices.minByOrNull { i ->
+            val mode = modes[i]
+            abs(mode.fps - targetFps) * 1000 + (if (mode.w >= 1920) 0 else 5000) + (if (targetFps == 60 && mode.w >= 3840) 1500 else 0)
+        }
+        if (preferredMode != null) modeIdx = preferredMode
+        gamutCine = true
+        tenBitPref = supportsMain10()
+        outputRec709 = false
+        assistPref = true
+        autoExp = true
+        autoFocus = true
+        wbIdx = wbModes.indexOfFirst { it.first == CaptureRequest.CONTROL_AWB_MODE_AUTO }.coerceAtLeast(0)
+        if (profileIdx == 3) audioPref = true
+        prefs.edit().putInt("profile", profileIdx).putBoolean("gamut", gamutCine)
+            .putBoolean("ten", tenBitPref).putBoolean("outputRec709", outputRec709)
+            .putBoolean("assist", assistPref).putBoolean("audio", audioPref).apply()
+        clearLock(); defaultShutter(); pushSettings(); restartPipeline(); updateAll()
+        Toast.makeText(this, "${profileNames[profileIdx]} profile applied", Toast.LENGTH_SHORT).show()
     }
 
     private fun toggleSel(s: Sel) {
@@ -863,9 +914,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private fun updateInfo() {
         val m = modes.getOrNull(modeIdx)
-        tvInfo.text = (m?.label ?: "—") + "  ·  S-Log3  ·  " + (if (gamutCine) "S-Gamut3.Cine" else "S-Gamut3")
-        tvInfo2.text = (if (activeHlg) "HLG10" else "SDR") + " → " + (if (activeTenBit) "10-bit" else "8-bit") + " HEVC" +
-            (if (guideIdx > 0) "  ·  guide " + guides[guideIdx].first else "")
+        tvInfo.text = (m?.label ?: "—") + "  ·  S-Log3 encode  ·  " + (if (gamutCine) "S-Gamut3.Cine" else "S-Gamut3")
+        val freeGb = try { StatFs(Environment.getExternalStorageDirectory().absolutePath).availableBytes / (1024L * 1024L * 1024L) } catch (_: Throwable) { -1L }
+        tvInfo2.text = (if (activeHlg) "HLG10 input" else "SDR input") + " → " + (if (activeTenBit) "10-bit" else "8-bit") + " HEVC" +
+            (if (guideIdx > 0) "  ·  guide " + guides[guideIdx].first else "") +
+            (if (freeGb >= 0) "  ·  ${freeGb}GB free" else "")
     }
 
     private fun stylePill(v: TextView, sel: Boolean, manual: Boolean) {
@@ -919,6 +972,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vTen.text = if (tenBitPref) "On" else "Off"
         vAudio.text = if (audioPref) "On" else "Off"
         vAssist.text = if (assistPref) "On" else "Off"
+        vProfile.text = profileNames.getOrElse(profileIdx) { "Custom" }
+        vMonitorTools.text = monitorToolNames.getOrElse(monitorToolIdx) { "Off" }
         if (vOutputRec709.isChecked != outputRec709) vOutputRec709.isChecked = outputRec709
         vOutputRec709.isEnabled = !recording
         vRot.text = "${manualFor(displayRotationDeg()) * 90}°"
@@ -1582,6 +1637,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         zoomSpeedIdx = prefs.getInt("zoomSpeed", 1).coerceIn(0, zoomSpeeds.size - 1)
         gridIdx = prefs.getInt("grid", 0).coerceIn(0, gridNames.size - 1)
         levelOn = prefs.getBoolean("level", false)
+        profileIdx = prefs.getInt("profile", 0).coerceIn(0, profileNames.lastIndex)
+        monitorToolIdx = prefs.getInt("monitorTools", 0).coerceIn(0, monitorToolNames.lastIndex)
     }
 
     private fun loadValues() {
@@ -1608,6 +1665,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             .putInt("zoomSpeed", zoomSpeedIdx)
             .putInt("grid", gridIdx)
             .putBoolean("level", levelOn)
+            .putInt("profile", profileIdx)
+            .putInt("monitorTools", monitorToolIdx)
             .putBoolean("autoExp", autoExp)
             .putBoolean("autoFocus", autoFocus)
             .putInt("iso", isoProgress)

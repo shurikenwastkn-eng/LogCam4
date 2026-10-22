@@ -349,6 +349,10 @@
             </LinearLayout>
 
                 <TextView style="@style/section" android:tag="accent" android:text="MONITORING" />
+            <LinearLayout android:id="@+id/rowMonitorTools" style="@style/row">
+                <TextView style="@style/rowLabel" android:text="Exposure / focus assist" />
+                <TextView android:id="@+id/vMonitorTools" style="@style/rowValue" android:text="Off" />
+            </LinearLayout>
             <LinearLayout android:id="@+id/rowAssist" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Rec.709 preview" />
                 <TextView android:id="@+id/vAssist" style="@style/rowValue" />
@@ -367,6 +371,10 @@
             </LinearLayout>
 
                 <TextView style="@style/section" android:tag="accent" android:text="INTERFACE" />
+            <LinearLayout android:id="@+id/rowProfile" style="@style/row">
+                <TextView style="@style/rowLabel" android:text="Camera profile" />
+                <TextView android:id="@+id/vProfile" style="@style/rowValue" android:text="Custom" />
+            </LinearLayout>
             <LinearLayout android:id="@+id/rowControlPosition" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Control position" />
                 <TextView android:id="@+id/vControlPosition" style="@style/rowValue" />

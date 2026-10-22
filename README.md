@@ -1,9 +1,10 @@
-# LogCam
+# LogCam 2.0
 
-Native Android camera app that records S-Log3 (S-Gamut3.Cine / S-Gamut3) video.
+Native Android filmmaking camera with manual Camera2 controls, preview-only exposure/focus assists, framing guides, selectable camera profiles, Rec.709 monitoring, and an in-app recording library.
 
-Pipeline: Camera2 (manual ISO / shutter / focus / WB, HLG10 10-bit stream when the phone offers it)
--> OpenGL shader (linearise -> gamut convert -> S-Log3 OETF) -> HEVC Main10 encoder -> MP4 in Movies/LogCam.
+Pipeline: Camera2 (manual ISO / shutter / focus / WB where the selected camera supports them; HLG10 input where available) -> OpenGL conversion/monitoring -> HEVC encoder -> MP4 in `DCIM/LogCam`.
+
+**Colour note:** the app applies an S-Log3 encoding transform to the Camera2 source. This is not proof of sensor-native Sony S-Log capture; input characteristics vary by device, and footage should be tested and graded accordingly.
 
 ## Get the APK (no Android Studio needed)
 1. Create an empty GitHub repo, upload everything in this folder (keep the `.github` folder).
@@ -18,6 +19,8 @@ Set the clip's input colour space to Sony S-Gamut3.Cine / S-Log3 (or S-Gamut3 / 
 or use a Color Space Transform / ACES IDT with the same settings. Clips are tagged full range.
 
 ## Updating
-Builds are signed with the key in `app/logcam.jks`, so each new APK installs over the previous one and keeps
-your settings. (The very first install of this version needs the old LogCam uninstalled once.)
-Videos are saved to `DCIM/LogCam` and also appear in the in-app Recordings library.
+The release workflow publishes versioned APKs on GitHub Releases. Android requires user confirmation to install downloaded APK updates; updates are not silently installed by the app. The APK must be signed with the same key as the installed build to update in place.
+
+Camera profiles are starting points rather than guarantees: available frame rates and manual controls depend on the selected physical camera. Zebras, false colour and focus peaking are preview-only and are not burned into recorded footage.
+
+Videos are saved to `DCIM/LogCam` and appear in the in-app Recordings library.

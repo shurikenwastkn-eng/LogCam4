@@ -1,7 +1,6 @@
 name: Build APK
 on:
-  push:
-    branches: [main, master]
+  # Manual-only legacy build. The release workflow builds and publishes on pushes.
   workflow_dispatch: {}
 jobs:
   build:

@@ -1,6 +1,7 @@
 package com.logcam.app
 
 import android.graphics.SurfaceTexture
+import android.graphics.Color
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLContext
@@ -31,6 +32,8 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
     private val main = Handler(Looper.getMainLooper())
 
     @Volatile var monitorRec709 = false
+    /** Preview-only overlays: 0 off, 1 zebras, 2 false colour, 3 focus peaking. */
+    @Volatile var monitorTools = 0
     @Volatile var recordRec709 = false
     @Volatile var sourceHlg = false
     @Volatile var useCineGamut = true
@@ -68,6 +71,7 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
 
     private var uTex = 0; private var uRot = 0; private var uSampler = 0; private var uHlg = 0
     private var uGain = 0; private var uMode = 0; private var uGamut = 0; private var uView = 0
+    private var uTools = 0; private var uAccent = 0
 
     private var cachedKey = -1
     private var gamutM = FloatArray(9)
@@ -197,6 +201,8 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
         uMode = GLES30.glGetUniformLocation(prog, "uMode")
         uGamut = GLES30.glGetUniformLocation(prog, "uGamut")
         uView = GLES30.glGetUniformLocation(prog, "uView")
+        uTools = GLES30.glGetUniformLocation(prog, "uTools")
+        uAccent = GLES30.glGetUniformLocation(prog, "uAccent")
 
         val t = IntArray(1)
         GLES30.glGenTextures(1, t, 0)
@@ -255,7 +261,7 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
                 val w = IntArray(1); val h = IntArray(1)
                 EGL14.eglQuerySurface(dpy, previewEgl, EGL14.EGL_WIDTH, w, 0)
                 EGL14.eglQuerySurface(dpy, previewEgl, EGL14.EGL_HEIGHT, h, 0)
-                draw(w[0], h[0], true, if (monitorRec709) 1f else 0f, computeK(displayRotationDeg, manualQuarterTurns, true))
+                draw(w[0], h[0], true, if (monitorRec709) 1f else 0f, computeK(displayRotationDeg, manualQuarterTurns, true), monitorTools)
                 EGL14.eglSwapBuffers(dpy, previewEgl)
             }
 
@@ -290,7 +296,7 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
     /** Clockwise rotation (degrees) from the raw sensor image to what the preview shows. */
     fun totalRotationDeg(): Int = ((if (lastSwapped) sensorOrientation else 0) + 90 * lastK) % 360
 
-    private fun draw(w: Int, h: Int, letterbox: Boolean, mode: Float, k: Int) {
+    private fun draw(w: Int, h: Int, letterbox: Boolean, mode: Float, k: Int, tools: Int = 0) {
         refreshMatrices()
         GLES30.glViewport(0, 0, w, h)
         GLES30.glClearColor(0f, 0f, 0f, 1f)
@@ -317,6 +323,9 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
         GLES30.glUniform1f(uMode, mode)
         GLES30.glUniformMatrix3fv(uGamut, 1, false, gamutM, 0)
         GLES30.glUniformMatrix3fv(uView, 1, false, viewM, 0)
+        GLES30.glUniform1i(uTools, tools.coerceIn(0, 3))
+        val accent = Theme.accent
+        GLES30.glUniform3f(uAccent, Color.red(accent) / 255f, Color.green(accent) / 255f, Color.blue(accent) / 255f)
 
         quad.position(0)
         GLES30.glEnableVertexAttribArray(0)
@@ -362,6 +371,8 @@ uniform mat3 uView;    // source primaries -> Rec.709 (view assist)
 uniform float uHlg;    // 1 = HLG (BT.2020) source, 0 = SDR (BT.709) source
 uniform float uGain;   // exposure offset (linear multiplier)
 uniform float uMode;   // 0 = S-Log3 out, 1 = Rec.709 view assist
+uniform int uTools;    // preview-only exposure/focus overlays; encoder passes 0
+uniform vec3 uAccent;
 
 float hlgInv(float e) {
     const float a = 0.17883277;
@@ -387,13 +398,34 @@ void main() {
         lin = pow(max(c, vec3(0.0)), vec3(2.2)) * 0.9;
     }
     lin *= uGain;
+    vec3 viewColor = pow(clamp(uView * lin, 0.0, 1.0), vec3(1.0 / 2.2));
+    float lum = dot(viewColor, vec3(0.2126, 0.7152, 0.0722));
+    vec3 baseColor;
     if (uMode > 0.5) {
-        vec3 v = clamp(uView * lin, 0.0, 1.0);
-        fragColor = vec4(pow(v, vec3(1.0 / 2.2)), 1.0);
+        baseColor = viewColor;
+    } else {
+        vec3 g = uGamut * lin;
+        baseColor = clamp(vec3(slog3(g.r), slog3(g.g), slog3(g.b)), 0.0, 1.0);
+    }
+    if (uTools == 2) {
+        vec3 fc = lum < 0.08 ? vec3(0.02, 0.05, 0.65) :
+                  lum < 0.20 ? vec3(0.0, 0.55, 1.0) :
+                  lum < 0.40 ? vec3(0.0, 0.85, 0.45) :
+                  lum < 0.60 ? vec3(0.05, 0.85, 0.05) :
+                  lum < 0.78 ? vec3(1.0, 0.85, 0.0) :
+                  lum < 0.92 ? vec3(1.0, 0.35, 0.0) : vec3(0.95, 0.02, 0.02);
+        fragColor = vec4(fc, 1.0);
         return;
     }
-    vec3 g = uGamut * lin;
-    fragColor = vec4(clamp(vec3(slog3(g.r), slog3(g.g), slog3(g.b)), 0.0, 1.0), 1.0);
+    if (uTools == 1 && lum >= 0.90 && mod(floor((gl_FragCoord.x + gl_FragCoord.y) / 8.0), 2.0) < 1.0) {
+        baseColor = mix(baseColor, vec3(1.0, 0.0, 0.0), 0.82);
+    } else if (uTools == 3) {
+        vec3 dx = texture(uSampler, vUv + vec2(0.002, 0.0)).rgb - texture(uSampler, vUv - vec2(0.002, 0.0)).rgb;
+        vec3 dy = texture(uSampler, vUv + vec2(0.0, 0.002)).rgb - texture(uSampler, vUv - vec2(0.0, 0.002)).rgb;
+        float edge = length(dx) + length(dy);
+        if (edge > 0.12) baseColor = mix(baseColor, uAccent, 0.92);
+    }
+    fragColor = vec4(baseColor, 1.0);
 }
 """
     }
