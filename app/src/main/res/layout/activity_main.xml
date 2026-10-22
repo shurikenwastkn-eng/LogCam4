@@ -405,7 +405,7 @@
         android:id="@+id/libraryPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#F2000000"
+        android:background="#FF0F0F10"
         android:clickable="true"
         android:orientation="vertical"
         android:visibility="gone">
@@ -415,10 +415,10 @@
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingStart="28dp"
-            android:paddingTop="14dp"
-            android:paddingEnd="28dp"
-            android:paddingBottom="4dp">
+            android:paddingStart="14dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="0dp">
 
             <TextView
                 android:id="@+id/libTitle"
@@ -427,7 +427,7 @@
                 android:layout_weight="1"
                 android:fontFamily="sans-serif-medium"
                 android:textColor="#FFFFFF"
-                android:textSize="18sp" />
+                android:textSize="20sp" />
 
             <LinearLayout
                 android:id="@+id/libActions"
@@ -447,15 +447,6 @@
                 android:layout_marginStart="12dp"
                 android:text="Close" />
         </LinearLayout>
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="28dp"
-            android:paddingBottom="10dp"
-            android:text="Tap to open  ·  hold to select  ·  share icon on each clip"
-            android:textColor="#80FFFFFF"
-            android:textSize="11sp" />
 
         <TextView
             android:id="@+id/tvLibEmpty"
@@ -482,7 +473,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:paddingBottom="24dp" />
+                android:paddingBottom="8dp" />
         </ScrollView>
     </LinearLayout>
 </FrameLayout>
