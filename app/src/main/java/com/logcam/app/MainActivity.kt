@@ -455,6 +455,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vTen = findViewById(R.id.vTen); vAudio = findViewById(R.id.vAudio)
         vAssist = findViewById(R.id.vAssist); vOutputRec709 = findViewById(R.id.vOutputRec709); vRot = findViewById(R.id.vRot)
         btnLibrary = findViewById(R.id.btnLibrary); libraryPanel = findViewById(R.id.libraryPanel)
+        // Keep the library clear of the camera cutout / system bars now that the app is edge-to-edge.
+        libraryPanel.setOnApplyWindowInsetsListener { v, ins ->
+            val si = safeInsets(ins)
+            v.setPadding(si[0], si[1], si[2], si[3])
+            ins
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                android.window.OnBackInvokedCallback { if (!handleBack()) finish() }
+            )
+        }
         libraryList = findViewById(R.id.libraryList); tvLibEmpty = findViewById(R.id.tvLibEmpty)
         btnLibClose = findViewById(R.id.btnLibClose)
         levelView = findViewById(R.id.levelView); tvLock = findViewById(R.id.tvLock)
@@ -1591,6 +1603,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         settingsPanel.visibility = View.GONE
         dismissCameraControl()
         libraryPanel.visibility = View.VISIBLE
+        libraryPanel.requestApplyInsets()
         selClips.clear(); libSel.clear()
         libraryList.removeAllViews()
         updateLibHeader()
@@ -1883,6 +1896,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         bottom.addView(speedButton, LinearLayout.LayoutParams(WC, dp(44)))
         val pillW = minOf(resources.displayMetrics.widthPixels - dp(24), dp(520))
         root.addView(bottom, FrameLayout.LayoutParams(pillW, dp(52), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(16) })
+        root.setOnApplyWindowInsetsListener { _, ins ->
+            val si = safeInsets(ins)
+            top.setPadding(dp(12) + si[0], dp(10) + si[1], dp(12) + si[2], dp(16))
+            (bottom.layoutParams as FrameLayout.LayoutParams).bottomMargin = dp(16) + si[3]
+            bottom.requestLayout()
+            ins
+        }
 
         scheduleHideControls = {
             hideControlsRunnable?.let { ui.removeCallbacks(it) }
@@ -2233,17 +2253,36 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         }.start()
     }
 
-    override fun onBackPressed() {
-        when {
-            settingsPanel.visibility == View.VISIBLE -> settingsPanel.visibility = View.GONE
+    // Returns true when the back press was consumed by one of our panels.
+    private fun handleBack(): Boolean {
+        return when {
+            settingsPanel.visibility == View.VISIBLE -> { settingsPanel.visibility = View.GONE; true }
             libraryPanel.visibility == View.VISIBLE -> {
                 if (selClips.isNotEmpty()) clearSelection()
                 else {
                     libraryPanel.visibility = View.GONE
                     requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                 }
+                true
             }
-            else -> super.onBackPressed()
+            else -> false
+        }
+    }
+
+    // Android 12 and older still call this.
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onBackPressed() {
+        if (!handleBack()) super.onBackPressed()
+    }
+
+    // Safe-area insets (status bar, navigation bar and display cutout) as [left, top, right, bottom].
+    @Suppress("DEPRECATION")
+    private fun safeInsets(i: WindowInsets): IntArray {
+        return if (Build.VERSION.SDK_INT >= 30) {
+            val v = i.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            intArrayOf(v.left, v.top, v.right, v.bottom)
+        } else {
+            intArrayOf(i.systemWindowInsetLeft, i.systemWindowInsetTop, i.systemWindowInsetRight, i.systemWindowInsetBottom)
         }
     }
 
