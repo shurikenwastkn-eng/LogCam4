@@ -341,6 +341,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         running = true
         val g = GlPipeline(preview.holder.surface, tenBitPref)
         gl = g
+        g.previewPaused = ::libraryPanel.isInitialized && libraryPanel.visibility == View.VISIBLE
         g.monitorRec709 = assistPref
         g.recordRec709 = outputRec709
         g.useCineGamut = gamutCine
@@ -492,7 +493,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         btnLibClose.setOnClickListener {
             if (selClips.isNotEmpty()) clearSelection()
             else {
-                libraryPanel.visibility = View.GONE
+                hideLibrary()
                 requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             }
         }
@@ -526,7 +527,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             if (wbModes.isNotEmpty()) {
                 dismissCameraControl()
                 settingsPanel.visibility = View.GONE
-                libraryPanel.visibility = View.GONE
+                hideLibrary()
                 showGlassChoice("White balance", wbModes.map { it.second }, wbIdx) { index ->
                     wbIdx = index; pushSettings(); updateAll()
                 }
@@ -641,7 +642,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private fun toggleSel(s: Sel) {
         settingsPanel.visibility = View.GONE
-        libraryPanel.visibility = View.GONE
+        hideLibrary()
         selected = if (selected == s) Sel.NONE else s
         refreshSlider(); updateAll()
     }
@@ -1599,10 +1600,16 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         showLibrary()
     }
 
+    private fun hideLibrary() {
+        libraryPanel.visibility = View.GONE
+        gl?.previewPaused = false
+    }
+
     private fun showLibrary() {
         settingsPanel.visibility = View.GONE
         dismissCameraControl()
         libraryPanel.visibility = View.VISIBLE
+        gl?.previewPaused = true   // stop drawing the camera preview behind the library: smoother scrolling, less heat
         libraryPanel.requestApplyInsets()
         selClips.clear(); libSel.clear()
         libraryList.removeAllViews()
@@ -1660,6 +1667,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun buildGrid(clips: List<Clip>) {
         libraryList.removeAllViews()
         libSel.clear()
+        libTiles.clear()
+        (libraryList.parent as? android.widget.ScrollView)?.setOnScrollChangeListener { _, _, _, _, _ -> loadVisibleThumbs() }
         // Edge-to-edge grid with hairline gaps: 3 columns in portrait, 6 in landscape, grouped by day.
         val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val cols = if (landscape) 6 else 3
@@ -1691,6 +1700,46 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             }
             row!!.addView(buildTile(c, tile, if (inRow == cols - 1) 0 else gap))
             inRow++
+        }
+        libraryList.post { loadVisibleThumbs() }
+    }
+
+    private class TileRef(val clip: Clip, val view: View, val img: ImageView, var requested: Boolean = false)
+
+    private val libTiles = ArrayList<TileRef>()
+    private val thumbCache = object : android.util.LruCache<String, android.graphics.Bitmap>(
+        (Runtime.getRuntime().maxMemory() / 1024 / 8).toInt()
+    ) {
+        override fun sizeOf(key: String, value: android.graphics.Bitmap): Int = value.byteCount / 1024
+    }
+
+    // Only decode thumbnails for tiles on screen or within one screen of it, so scrolling never waits on a flood of work.
+    private fun loadVisibleThumbs() {
+        val sv = libraryList.parent as? android.widget.ScrollView ?: return
+        val lo = sv.scrollY - sv.height
+        val hi = sv.scrollY + sv.height * 2
+        for (t in libTiles) {
+            if (t.requested) continue
+            val row = t.view.parent as? View ?: continue
+            if (row.bottom >= lo && row.top <= hi) requestThumb(t)
+        }
+    }
+
+    private fun requestThumb(t: TileRef) {
+        t.requested = true
+        val key = t.clip.uri.toString()
+        val cached = thumbCache.get(key)
+        if (cached != null) { t.img.setImageBitmap(cached); return }
+        thumbPool.execute {
+            val bmp = try { contentResolver.loadThumbnail(t.clip.uri, Size(480, 270), null) } catch (e: Throwable) { null }
+            if (bmp != null) {
+                thumbCache.put(key, bmp)
+                runOnUiThread {
+                    t.img.alpha = 0f
+                    t.img.setImageBitmap(bmp)
+                    t.img.animate().alpha(1f).setDuration(160).start()
+                }
+            }
         }
     }
 
@@ -1735,10 +1784,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         thumb.setOnClickListener { if (selClips.isNotEmpty()) toggleSelect(c) else openClip(c.uri) }
         thumb.setOnLongClickListener { toggleSelect(c); true }
 
-        thumbPool.execute {
-            val bmp = try { contentResolver.loadThumbnail(c.uri, Size(480, 270), null) } catch (t: Throwable) { null }
-            if (bmp != null) runOnUiThread { iv.setImageBitmap(bmp) }
-        }
+        libTiles.add(TileRef(c, thumb, iv))
         return thumb
     }
 
@@ -2260,7 +2306,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             libraryPanel.visibility == View.VISIBLE -> {
                 if (selClips.isNotEmpty()) clearSelection()
                 else {
-                    libraryPanel.visibility = View.GONE
+                    hideLibrary()
                     requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                 }
                 true
