@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "com.logcam.app"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.logcam.app"
         minSdk = 29
-        targetSdk = 34
+        targetSdk = 36
         versionCode = providers.gradleProperty("appVersionCode").orNull?.toIntOrNull() ?: 1
         versionName = providers.gradleProperty("appVersionName").getOrElse("0.1")
     }
