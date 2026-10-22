@@ -1369,9 +1369,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun rebuildChips() {
+        val keepExpanded = zoomLevelsExpanded
+        ui.removeCallbacks(zoomLevelsTimeout)
         zoomChips.removeAllViews(); chipViews.clear()
         zoomLevelsExpanded = false
-        ui.removeCallbacks(zoomLevelsTimeout)
         zoomToggleButton = TextView(this).apply {
             text = "Zoom"
             textSize = 12f
@@ -1405,6 +1406,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 else list.add(Chip(f, lensIdx, pz))
             }
         }
+        // Add useful digital zoom stops as well as the optical lens-switch points.
+        // These use the active lens and are clamped to the camera's supported range.
+        val digitalStops = floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f, 4f, 5f, 6f, 8f, 10f, 12f, 15f)
+        for (z in digitalStops) {
+            if (z < zoomMin - 0.01f || z > uiZoomMax() + 0.01f) continue
+            val f = curLensFactor * z
+            val existing = list.indexOfFirst { abs(it.factor - f) < 0.10f }
+            if (existing < 0) list.add(Chip(f, lensIdx, z))
+            else if (list[existing].lensIdx == lensIdx && list[existing].zoom == 1f && z > 1f) {
+                list[existing] = Chip(f, lensIdx, z)
+            }
+        }
         list.sortBy { it.factor }
         chips = list
         zoomChips.visibility = if (list.size > 1) View.VISIBLE else View.GONE
@@ -1423,13 +1436,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             tv.layoutParams = lp
             tv.setOnClickListener {
                 onChip(c)
-                ui.removeCallbacks(zoomLevelsTimeout)
-                ui.postDelayed(zoomLevelsTimeout, 2200)
+                scheduleZoomLevelsCollapse()
             }
             zoomChips.addView(tv)
             chipViews.add(tv)
         }
         updateChips()
+        if (keepExpanded && chips.size > 1) {
+            zoomLevelsExpanded = true
+            zoomToggleButton.visibility = View.GONE
+            chipViews.forEach { it.visibility = View.VISIBLE; it.alpha = 1f; it.scaleX = 1f; it.scaleY = 1f }
+            scheduleZoomLevelsCollapse()
+        }
     }
 
     private fun expandZoomLevels() {
@@ -1449,7 +1467,12 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                         .setStartDelay(index * 22L).setDuration(180).start()
                 }
             }.start()
-        ui.postDelayed(zoomLevelsTimeout, 2200)
+        scheduleZoomLevelsCollapse()
+    }
+
+    private fun scheduleZoomLevelsCollapse() {
+        ui.removeCallbacks(zoomLevelsTimeout)
+        if (zoomLevelsExpanded) ui.postDelayed(zoomLevelsTimeout, 5000)
     }
 
     private fun collapseZoomLevels(animated: Boolean) {
