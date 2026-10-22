@@ -1628,39 +1628,66 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         return out
     }
 
-    private fun buildGrid(clips: List<Clip>) {
-        libraryList.removeAllViews()
-        libSel.clear()
-        // Use the available width: denser grid in landscape, larger thumbnails in portrait.
-        val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        val cols = if (landscape) 5 else 3
-        val side = dp(if (landscape) 18 else 20)
-        val gap = dp(if (landscape) 10 else 12)
-        val availableWidth = resources.displayMetrics.widthPixels - 2 * side
-        val cardW = ((availableWidth - (cols - 1) * gap) / cols).coerceAtLeast(dp(72))
-        var row: LinearLayout? = null
-        for ((i, c) in clips.withIndex()) {
-            if (i % cols == 0) {
-                row = LinearLayout(this)
-                row.orientation = LinearLayout.HORIZONTAL
-                row.setPadding(side, 0, side, dp(14))
-                libraryList.addView(row)
-            }
-            row?.addView(buildCard(c, cardW, gap))
+    private fun dayLabel(ms: Long): String {
+        val cal = java.util.Calendar.getInstance()
+        fun dayKey(t: Long): Int {
+            cal.timeInMillis = t
+            return cal.get(java.util.Calendar.YEAR) * 1000 + cal.get(java.util.Calendar.DAY_OF_YEAR)
+        }
+        val k = dayKey(ms)
+        val today = dayKey(System.currentTimeMillis())
+        val yesterday = dayKey(System.currentTimeMillis() - 24L * 3600_000L)
+        return when (k) {
+            today -> "Today"
+            yesterday -> "Yesterday"
+            else -> SimpleDateFormat("d MMMM", Locale.getDefault()).format(Date(ms))
         }
     }
 
-    private fun buildCard(c: Clip, w: Int, gap: Int): View {
-        val card = LinearLayout(this)
-        card.orientation = LinearLayout.VERTICAL
-        val lp = LinearLayout.LayoutParams(w, LinearLayout.LayoutParams.WRAP_CONTENT)
-        lp.marginEnd = gap
-        card.layoutParams = lp
+    private fun buildGrid(clips: List<Clip>) {
+        libraryList.removeAllViews()
+        libSel.clear()
+        // Edge-to-edge grid with hairline gaps: 3 columns in portrait, 6 in landscape, grouped by day.
+        val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val cols = if (landscape) 6 else 3
+        val gap = dp(2)
+        val tile = ((resources.displayMetrics.widthPixels - (cols - 1) * gap) / cols).coerceAtLeast(dp(72))
+        var lastLabel: String? = null
+        var row: LinearLayout? = null
+        var inRow = 0
+        for (c in clips) {
+            val label = dayLabel(c.dateMs)
+            if (label != lastLabel) {
+                lastLabel = label
+                row = null
+                val header = TextView(this)
+                header.text = label
+                header.setTextColor(Color.parseColor("#A3A39F"))
+                header.textSize = 12f
+                header.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                header.setPadding(dp(14), dp(14), dp(14), dp(6))
+                libraryList.addView(header)
+            }
+            if (row == null || inRow == cols) {
+                val r = LinearLayout(this)
+                r.orientation = LinearLayout.HORIZONTAL
+                r.setPadding(0, 0, 0, gap)
+                libraryList.addView(r)
+                row = r
+                inRow = 0
+            }
+            row!!.addView(buildTile(c, tile, if (inRow == cols - 1) 0 else gap))
+            inRow++
+        }
+    }
 
+    private fun buildTile(c: Clip, w: Int, gapEnd: Int): View {
         val thumb = FrameLayout(this)
-        thumb.layoutParams = LinearLayout.LayoutParams(w, w * 9 / 16)
-        thumb.background = shape(Color.parseColor("#26FFFFFF"), 12f)
-        thumb.clipToOutline = true
+        val lp = LinearLayout.LayoutParams(w, w)
+        lp.marginEnd = gapEnd
+        thumb.layoutParams = lp
+        thumb.setBackgroundColor(Color.parseColor("#1A1A1C"))
+        thumb.contentDescription = c.name.removeSuffix(".mp4")
 
         val iv = ImageView(this)
         iv.scaleType = ImageView.ScaleType.CENTER_CROP
@@ -1670,64 +1697,36 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         val dur = TextView(this)
         dur.text = String.format(Locale.US, "%d:%02d", secs / 60, secs % 60)
         dur.setTextColor(Color.WHITE)
-        dur.textSize = 11f
-        dur.background = shape(Color.parseColor("#A6000000"), 6f)
-        dur.setPadding(dp(6), dp(2), dp(6), dp(2))
+        dur.textSize = 10f
+        dur.background = shape(Color.parseColor("#99000000"), 5f)
+        dur.setPadding(dp(5), dp(1), dp(5), dp(1))
         val dlp = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END)
-        dlp.setMargins(0, 0, dp(6), dp(6))
+        dlp.setMargins(0, 0, dp(5), dp(5))
         thumb.addView(dur, dlp)
 
-        val share = ImageView(this)
-        share.setImageResource(R.drawable.ic_share)
-        share.background = shape(Color.parseColor("#B30C0D10"), 0f, Theme.alpha(AMBER, 0x55), 1f, true)
-        share.setPadding(dp(7), dp(7), dp(7), dp(7))
-        share.setOnClickListener { shareClips(listOf(c)) }
-        val slp = FrameLayout.LayoutParams(dp(32), dp(32), Gravity.TOP or Gravity.END)
-        slp.setMargins(0, dp(6), dp(6), 0)
-
         val sel = FrameLayout(this)
-        sel.background = shape(Theme.alpha(AMBER, 0x33), 12f, AMBER, 3f)
+        sel.background = shape(Theme.alpha(AMBER, 0x33), 0f, AMBER, 3f)
         val chk = TextView(this)
         chk.text = "✓"
         chk.setTextColor(Color.BLACK)
-        chk.textSize = 13f
+        chk.textSize = 12f
         chk.gravity = Gravity.CENTER
         chk.background = shape(AMBER, 0f, 0, 0f, true)
-        val clp = FrameLayout.LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.START)
-        clp.setMargins(dp(8), dp(8), 0, 0)
+        val clp = FrameLayout.LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.START)
+        clp.setMargins(dp(6), dp(6), 0, 0)
         sel.addView(chk, clp)
         sel.visibility = if (selClips.containsKey(c.uri)) View.VISIBLE else View.GONE
         libSel[c.uri] = sel
-
-        thumb.addView(share, slp)
         thumb.addView(sel, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
-        val name = TextView(this)
-        name.text = c.name.removeSuffix(".mp4")
-        name.setTextColor(Color.WHITE)
-        name.textSize = 12f
-        name.isSingleLine = true
-        name.ellipsize = TextUtils.TruncateAt.END
-        name.setPadding(dp(2), dp(7), 0, 0)
-
-        val meta = TextView(this)
-        meta.text = SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(c.dateMs)) +
-            "  ·  " + String.format(Locale.US, "%.0f MB", c.size / 1048576.0)
-        meta.setTextColor(Color.parseColor("#99FFFFFF"))
-        meta.textSize = 10f
-        meta.setPadding(dp(2), dp(1), 0, 0)
-
-        card.addView(thumb)
-        card.addView(name)
-        card.addView(meta)
-        card.setOnClickListener { if (selClips.isNotEmpty()) toggleSelect(c) else openClip(c.uri) }
-        card.setOnLongClickListener { toggleSelect(c); true }
+        thumb.setOnClickListener { if (selClips.isNotEmpty()) toggleSelect(c) else openClip(c.uri) }
+        thumb.setOnLongClickListener { toggleSelect(c); true }
 
         thumbPool.execute {
             val bmp = try { contentResolver.loadThumbnail(c.uri, Size(480, 270), null) } catch (t: Throwable) { null }
             if (bmp != null) runOnUiThread { iv.setImageBitmap(bmp) }
         }
-        return card
+        return thumb
     }
 
     private fun toggleSelect(c: Clip) {
@@ -1743,7 +1742,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun updateLibHeader() {
-        libTitle.text = if (selClips.isEmpty()) "Recordings" + (if (libClips.isNotEmpty()) "  ·  ${libClips.size}" else "")
+        libTitle.text = if (selClips.isEmpty()) "Library" + (if (libClips.isNotEmpty()) "  ·  ${libClips.size}" else "")
         else "${selClips.size} selected"
         libActions.visibility = if (selClips.isEmpty()) View.GONE else View.VISIBLE
         btnLibClose.text = if (selClips.isEmpty()) "Close" else "Cancel"
@@ -1766,36 +1765,45 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         val video = VideoView(this)
         root.addView(video, FrameLayout.LayoutParams(MP, MP))
 
+        // Slim, floating chrome: two round buttons + a clip chip on top, one compact control pill below.
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(6), dp(8), dp(6))
-            background = ColorDrawable(Theme.alpha(Color.BLACK, 0xB8))
+            setPadding(dp(12), dp(10), dp(12), dp(16))
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Theme.alpha(Color.BLACK, 0x80), Color.TRANSPARENT))
         }
+        fun roundIcon(res: Int, desc: String): ImageView = ImageView(this).apply {
+            setImageResource(res)
+            setPadding(dp(11), dp(11), dp(11), dp(11))
+            background = shape(Theme.alpha(Color.BLACK, 0x66), 0f, 0, 0f, true)
+            contentDescription = desc
+            isClickable = true
+        }
+        val close = roundIcon(R.drawable.ic_back, "Close video")
+        val more = roundIcon(R.drawable.ic_more, "More options")
         val title = TextView(this).apply {
             text = currentClip.name
             setTextColor(Color.WHITE)
-            textSize = 15f
+            textSize = 11f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-        }
-        top.addView(title, LinearLayout.LayoutParams(0, WC, 1f))
-        val close = TextView(this).apply {
-            text = "✕"
-            textSize = 22f
             gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setPadding(dp(14), dp(4), dp(4), dp(4))
-            contentDescription = "Close video"
+            background = shape(Theme.alpha(Color.BLACK, 0x66), 13f)
+            setPadding(dp(10), dp(5), dp(10), dp(5))
         }
-        top.addView(close, LinearLayout.LayoutParams(WC, dp(44)))
+        top.addView(close, LinearLayout.LayoutParams(dp(44), dp(44)))
+        top.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        top.addView(title, LinearLayout.LayoutParams(WC, WC))
+        top.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        top.addView(more, LinearLayout.LayoutParams(dp(44), dp(44)))
         root.addView(top, FrameLayout.LayoutParams(MP, WC, Gravity.TOP))
 
         val bottom = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(6), dp(12), dp(8))
-            background = ColorDrawable(Theme.alpha(Color.BLACK, 0xC8))
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), 0, dp(10), 0)
+            background = shape(Theme.alpha(Color.parseColor("#141416"), 0xB8), 26f)
         }
         val seek = SeekBar(this).apply {
             max = 1000
@@ -1804,88 +1812,76 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             progressBackgroundTintList = ColorStateList.valueOf(Theme.alpha(Color.WHITE, 0x38))
             splitTrack = false
         }
-        bottom.addView(seek, LinearLayout.LayoutParams(MP, dp(22)))
-        val currentTime = TextView(this).apply { text = "0:00"; setTextColor(Color.WHITE); textSize = 12f }
-        val totalTime = TextView(this).apply { text = "0:00"; setTextColor(Theme.accent); textSize = 12f }
-        // Time labels sit beside the compact playback controls below the timeline.
+        val currentTime = TextView(this).apply { text = "0:00"; setTextColor(Color.WHITE); textSize = 12f; gravity = Gravity.CENTER; minWidth = dp(32) }
+        val totalTime = TextView(this).apply { text = "0:00"; setTextColor(Theme.alpha(Color.WHITE, 0xB3)); textSize = 12f; gravity = Gravity.CENTER; minWidth = dp(32) }
 
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(4), 0, 0)
-        }
         var scheduleHideControls: () -> Unit = {}
-        fun playerButton(label: String, emphasis: Boolean = false, action: () -> Unit): TextView {
-            return TextView(this).apply {
-                text = label
-                gravity = Gravity.CENTER
-                textSize = if (emphasis) 16f else 13f
-                typeface = Typeface.create(if (emphasis) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
-                setTextColor(if (emphasis) Theme.onAccent() else Color.WHITE)
-                background = if (emphasis) shape(Theme.accent, 18f) else shape(Theme.alpha(Color.parseColor("#202127"), 0xF0), 18f, Theme.alpha(Theme.accent, 0x70), dp(1).toFloat())
-                setPadding(dp(14), dp(10), dp(14), dp(10))
-                isClickable = true
-                setOnClickListener { action() }
-            }
-        }
-        var playPause: TextView? = null
+        var playPause: ImageView? = null
         var navigateTo: ((Int) -> Unit)? = null
-        val prev = playerButton("‹ Prev") { navigateTo?.invoke((clipIndex - 1).coerceAtLeast(0)) }
-        val playPauseButton = playerButton("Ⅱ", true) {
+        fun setPlayIcon(playing: Boolean) {
+            playPause?.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
+        }
+        val playPauseButton = ImageView(this).apply {
+            setImageResource(R.drawable.ic_pause)
+            setPadding(dp(11), dp(11), dp(11), dp(11))
+            contentDescription = "Play or pause"
+            isClickable = true
+        }
+        playPauseButton.setOnClickListener {
             if (video.isPlaying) {
-                video.pause(); playPause?.text = "▶"
+                video.pause(); setPlayIcon(false)
                 hideControlsRunnable?.let { ui.removeCallbacks(it) }
                 controlsVisible = true
                 top.visibility = View.VISIBLE; bottom.visibility = View.VISIBLE
                 top.alpha = 1f; bottom.alpha = 1f
             } else {
-                video.start(); playPause?.text = "Ⅱ"
+                video.start(); setPlayIcon(true)
                 scheduleHideControls()
             }
         }
         playPause = playPauseButton
-        val next = playerButton("Next ›") { navigateTo?.invoke((clipIndex + 1).coerceAtMost(libClips.lastIndex)) }
-        var speedButtonLabel: TextView? = null
-        val speedButton = playerButton("1×") {
+
+        val speedButton = TextView(this).apply {
+            text = "1×"
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            minWidth = dp(40)
+            contentDescription = "Playback speed"
+            isClickable = true
+        }
+        speedButton.setOnClickListener {
             playbackSpeed = when (playbackSpeed) { 0.5f -> 1f; 1f -> 1.5f; 1.5f -> 2f; else -> 0.5f }
-            speedButtonLabel?.text = "${playbackSpeed}×".replace(".0×", "×")
+            speedButton.text = "${playbackSpeed}×".replace(".0×", "×")
             try { activeMediaPlayer?.playbackParams = android.media.PlaybackParams().setSpeed(playbackSpeed) } catch (_: Throwable) {}
         }
-        speedButtonLabel = speedButton
-        val export = playerButton("Export") { exportClips(listOf(currentClip)) }
-        val share = playerButton("Share") { shareClips(listOf(currentClip)) }
-        actions.addView(playPauseButton, LinearLayout.LayoutParams(dp(42), dp(38)).apply { marginEnd = dp(8) })
-        actions.addView(currentTime, LinearLayout.LayoutParams(WC, WC).apply { marginEnd = dp(4) })
-        actions.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-        actions.addView(totalTime, LinearLayout.LayoutParams(WC, WC).apply { marginEnd = dp(8) })
-        actions.addView(speedButton, LinearLayout.LayoutParams(dp(48), dp(36)).apply { marginEnd = dp(6) })
-        actions.addView(share, LinearLayout.LayoutParams(dp(54), dp(36)).apply { marginEnd = dp(6) })
-        actions.addView(export, LinearLayout.LayoutParams(dp(58), dp(36)))
-        val filmstripScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-            setPadding(0, dp(4), 0, dp(2))
-        }
-        val filmstrip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        libClips.forEachIndexed { index, clip ->
-            val thumb = ImageView(this).apply {
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                background = shape(Color.parseColor("#25262B"), 5f)
-                clipToOutline = true
-                contentDescription = clip.name
-                alpha = if (index == clipIndex) 1f else 0.72f
+
+        more.setOnClickListener {
+            val menu = PopupMenu(this, more)
+            menu.menu.add(0, 1, 0, "Previous clip")
+            menu.menu.add(0, 2, 1, "Next clip")
+            menu.menu.add(0, 3, 2, "Share")
+            menu.menu.add(0, 4, 3, "Export")
+            menu.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    1 -> { navigateTo?.invoke((clipIndex - 1).coerceAtLeast(0)) }
+                    2 -> { navigateTo?.invoke((clipIndex + 1).coerceAtMost(libClips.lastIndex)) }
+                    3 -> { shareClips(listOf(currentClip)) }
+                    4 -> { exportClips(listOf(currentClip)) }
+                }
+                true
             }
-            filmstrip.addView(thumb, LinearLayout.LayoutParams(dp(62), dp(38)).apply { marginEnd = dp(5) })
-            thumbPool.execute {
-                val bitmap = try { contentResolver.loadThumbnail(clip.uri, Size(160, 90), null) } catch (_: Throwable) { null }
-                if (bitmap != null) runOnUiThread { thumb.setImageBitmap(bitmap) }
-            }
-            thumb.setOnClickListener { navigateTo?.invoke(index) }
+            menu.show()
         }
-        filmstripScroll.addView(filmstrip)
-        bottom.addView(filmstripScroll, LinearLayout.LayoutParams(MP, dp(44)))
-        bottom.addView(actions)
-        root.addView(bottom, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
+
+        bottom.addView(playPauseButton, LinearLayout.LayoutParams(dp(44), dp(44)))
+        bottom.addView(currentTime, LinearLayout.LayoutParams(WC, WC))
+        bottom.addView(seek, LinearLayout.LayoutParams(0, dp(44), 1f))
+        bottom.addView(totalTime, LinearLayout.LayoutParams(WC, WC))
+        bottom.addView(speedButton, LinearLayout.LayoutParams(WC, dp(44)))
+        val pillW = minOf(resources.displayMetrics.widthPixels - dp(24), dp(520))
+        root.addView(bottom, FrameLayout.LayoutParams(pillW, dp(52), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(16) })
 
         scheduleHideControls = {
             hideControlsRunnable?.let { ui.removeCallbacks(it) }
@@ -1942,7 +1938,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             seek.progress = 0
             currentTime.text = "0:00"
             totalTime.text = "0:00"
-            playPause?.text = "▶"
+            setPlayIcon(false)
             try { video.stopPlayback() } catch (t: Throwable) {
                 Log.w("LogCamGallery", "Could not stop previous clip cleanly", t)
             }
@@ -2001,7 +1997,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                     Log.w("LogCamGallery", "Playback speed unavailable on this device", t)
                 }
                 video.start()
-                playPause?.text = "Ⅱ"
+                setPlayIcon(true)
                 scheduleHideControls()
             } catch (t: Throwable) {
                 Log.e("LogCamGallery", "Failed while preparing gallery video", t)
@@ -2012,7 +2008,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             Log.e("LogCamGallery", "VideoView playback error what=$what extra=$extra uri=${currentClip.uri}")
             activeMediaPlayer = null
             preparedDuration = 0
-            playPause?.text = "▶"
+            setPlayIcon(false)
             Toast.makeText(this, "Couldn't play this recording. Try another clip.", Toast.LENGTH_LONG).show()
             true
         }
@@ -2023,7 +2019,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             bottom.visibility = View.VISIBLE
             top.alpha = 1f
             bottom.alpha = 1f
-            playPause?.text = "▶"
+            setPlayIcon(false)
         }
         dialog.show()
         dialog.window?.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
