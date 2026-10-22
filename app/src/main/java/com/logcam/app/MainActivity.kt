@@ -1763,7 +1763,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         val video = VideoView(this)
-        root.addView(video, FrameLayout.LayoutParams(MP, MP))
+        root.addView(video, FrameLayout.LayoutParams(MP, MP, Gravity.CENTER))
 
         // Slim, floating chrome: two round buttons + a clip chip on top, one compact control pill below.
         val top = LinearLayout(this).apply {
@@ -1781,6 +1781,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         }
         val close = roundIcon(R.drawable.ic_back, "Close video")
         val more = roundIcon(R.drawable.ic_more, "More options")
+        val shareBtn = roundIcon(R.drawable.ic_share, "Share")
         val title = TextView(this).apply {
             text = currentClip.name
             setTextColor(Color.WHITE)
@@ -1796,6 +1797,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         top.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         top.addView(title, LinearLayout.LayoutParams(WC, WC))
         top.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        top.addView(shareBtn, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(8) })
         top.addView(more, LinearLayout.LayoutParams(dp(44), dp(44)))
         root.addView(top, FrameLayout.LayoutParams(MP, WC, Gravity.TOP))
 
@@ -1857,17 +1859,16 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             try { activeMediaPlayer?.playbackParams = android.media.PlaybackParams().setSpeed(playbackSpeed) } catch (_: Throwable) {}
         }
 
+        shareBtn.setOnClickListener { shareClips(listOf(currentClip)) }
         more.setOnClickListener {
             val menu = PopupMenu(this, more)
             menu.menu.add(0, 1, 0, "Previous clip")
             menu.menu.add(0, 2, 1, "Next clip")
-            menu.menu.add(0, 3, 2, "Share")
-            menu.menu.add(0, 4, 3, "Export")
+            menu.menu.add(0, 4, 2, "Export")
             menu.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     1 -> { navigateTo?.invoke((clipIndex - 1).coerceAtLeast(0)) }
                     2 -> { navigateTo?.invoke((clipIndex + 1).coerceAtMost(libClips.lastIndex)) }
-                    3 -> { shareClips(listOf(currentClip)) }
                     4 -> { exportClips(listOf(currentClip)) }
                 }
                 true
@@ -1904,7 +1905,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             bottom.animate().alpha(1f).setDuration(120).start()
             scheduleHideControls()
         }
-        video.setOnClickListener {
+        fun toggleControls() {
             if (controlsVisible) {
                 controlsVisible = false
                 hideControlsRunnable?.let { ui.removeCallbacks(it) }
@@ -1912,6 +1913,23 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                 bottom.animate().alpha(0f).setDuration(140).withEndAction { if (!controlsVisible) bottom.visibility = View.GONE }.start()
             } else showControls()
         }
+        // Tap shows/hides the controls; a horizontal swipe jumps to the next / previous clip.
+        val playerGestures = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onSingleTapUp(e: MotionEvent): Boolean { toggleControls(); return true }
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+                val start = e1 ?: return false
+                val dx = e2.x - start.x
+                val dy = e2.y - start.y
+                if (kotlin.math.abs(dx) > dp(80) && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.5f && kotlin.math.abs(velocityX) > 600f) {
+                    val target = if (dx < 0) clipIndex + 1 else clipIndex - 1
+                    if (target in 0..libClips.lastIndex && target != clipIndex) navigateTo?.invoke(target)
+                    return true
+                }
+                return false
+            }
+        })
+        video.setOnTouchListener { _, ev -> playerGestures.onTouchEvent(ev) }
 
         val tick = object : Runnable {
             override fun run() {
