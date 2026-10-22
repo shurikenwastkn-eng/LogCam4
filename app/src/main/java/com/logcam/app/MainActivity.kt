@@ -1330,6 +1330,43 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         return (1000.0 * ln((z / lo).toDouble()) / ln((hi / lo).toDouble())).roundToInt().coerceIn(0, 1000)
     }
 
+    private var zoomTransitionGeneration = 0
+    private var zoomTransitionStart = 0f
+    private var zoomTransitionTarget = 1f
+    private var zoomTransitionStartMs = 0L
+    private var zoomTransitionDurationMs = 320L
+    private val zoomTransition = object : Runnable {
+        override fun run() {
+            val generation = zoomTransitionGeneration
+            val elapsed = (SystemClock.uptimeMillis() - zoomTransitionStartMs).coerceAtLeast(0L)
+            val t = (elapsed.toFloat() / zoomTransitionDurationMs).coerceIn(0f, 1f)
+            // Smooth ease-in/ease-out for deliberate zoom-stop changes.
+            val eased = t * t * (3f - 2f * t)
+            zoomShown = zoomTransitionStart * kotlin.math.exp(
+                kotlin.math.ln(zoomTransitionTarget / zoomTransitionStart) * eased
+            ).toFloat()
+            pushSettings(); updatePills(); updateSliderLabel(); updateChips()
+            if (t < 1f && generation == zoomTransitionGeneration) {
+                ui.postDelayed(this, 16L)
+            } else {
+                zoomShown = zoomTransitionTarget
+                pushSettings(); updatePills(); updateSliderLabel(); updateChips()
+            }
+        }
+    }
+
+    private fun animateZoomTo(target: Float) {
+        val safeTarget = target.coerceIn(zoomMin, uiZoomMax())
+        zoomTransitionGeneration++
+        ui.removeCallbacks(zoomTransition)
+        zoomTransitionStart = zoomShown.coerceIn(zoomMin, uiZoomMax()).coerceAtLeast(0.01f)
+        zoomTransitionTarget = safeTarget
+        zoomTransitionStartMs = SystemClock.uptimeMillis()
+        zoomTransitionDurationMs = (220L + (abs(kotlin.math.ln(safeTarget / zoomTransitionStart)) * 180L).toLong())
+            .coerceIn(260L, 650L)
+        ui.post(zoomTransition)
+    }
+
     /** Glides the real zoom towards the slider value, at the speed chosen in settings. */
     private val zoomTick = object : Runnable {
         override fun run() {
@@ -1408,7 +1445,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         }
         // Add useful digital zoom stops as well as the optical lens-switch points.
         // These use the active lens and are clamped to the camera's supported range.
-        val digitalStops = floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f, 4f, 5f, 6f, 8f, 10f, 12f, 15f)
+        val digitalStops = floatArrayOf(1f, 1.5f, 2f, 3f, 5f)
         for (z in digitalStops) {
             if (z < zoomMin - 0.01f || z > uiZoomMax() + 0.01f) continue
             val f = curLensFactor * z
@@ -1500,13 +1537,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun onChip(c: Chip) {
         if (c.lensIdx != lensIdx) {
             if (recording) { lockedToast(); return }
+            // Lens changes are hardware camera switches and can still have a brief optical handoff.
+            // Keep the current displayed zoom as the starting point, then ease toward the target.
+            val previousDisplayedZoom = (curLensFactor * zoomShown).coerceAtLeast(0.01f)
             lensIdx = c.lensIdx
             rebuildModes()
-            zoom = c.zoom.coerceIn(zoomMin, zoomMax); zoomShown = zoom
-            restartPipeline()
-        } else {
             zoom = c.zoom.coerceIn(zoomMin, zoomMax)
-            startZoomTick()
+            zoomShown = (previousDisplayedZoom / curLensFactor).coerceIn(zoomMin, uiZoomMax())
+            restartPipeline()
+            animateZoomTo(zoom)
+        } else {
+            zoom = c.zoom.coerceIn(zoomMin, uiZoomMax())
+            animateZoomTo(zoom)
         }
         if (selected == Sel.ZOOM) refreshSlider()
         updateAll()
