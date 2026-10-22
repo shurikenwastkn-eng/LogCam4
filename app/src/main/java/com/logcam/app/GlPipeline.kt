@@ -42,6 +42,8 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
     @Volatile var lastSwapped = false
     @Volatile private var released = false
     @Volatile private var recording = false
+    /** When true the on-screen preview is not drawn (e.g. while the library covers it); recording is unaffected. */
+    @Volatile var previewPaused = false
     var isTenBit = false
         private set
 
@@ -247,11 +249,15 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
             tex.getTransformMatrix(texMatrix)
             val ts = tex.timestamp
 
-            val w = IntArray(1); val h = IntArray(1)
-            EGL14.eglQuerySurface(dpy, previewEgl, EGL14.EGL_WIDTH, w, 0)
-            EGL14.eglQuerySurface(dpy, previewEgl, EGL14.EGL_HEIGHT, h, 0)
-            draw(w[0], h[0], true, if (monitorRec709) 1f else 0f, computeK(displayRotationDeg, manualQuarterTurns, true))
-            EGL14.eglSwapBuffers(dpy, previewEgl)
+            if (previewPaused) {
+                computeK(displayRotationDeg, manualQuarterTurns, true)
+            } else {
+                val w = IntArray(1); val h = IntArray(1)
+                EGL14.eglQuerySurface(dpy, previewEgl, EGL14.EGL_WIDTH, w, 0)
+                EGL14.eglQuerySurface(dpy, previewEgl, EGL14.EGL_HEIGHT, h, 0)
+                draw(w[0], h[0], true, if (monitorRec709) 1f else 0f, computeK(displayRotationDeg, manualQuarterTurns, true))
+                EGL14.eglSwapBuffers(dpy, previewEgl)
+            }
 
             val es = encEgl
             if (recording && es != EGL14.EGL_NO_SURFACE) {
