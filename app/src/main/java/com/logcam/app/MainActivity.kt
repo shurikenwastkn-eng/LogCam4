@@ -166,6 +166,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private class Chip(val factor: Float, val lensIdx: Int, val zoom: Float)
     private var chips: List<Chip> = emptyList()
     private val chipViews = ArrayList<TextView>()
+    private lateinit var zoomToggleButton: TextView
+    private var zoomLevelsExpanded = false
+    private val zoomLevelsTimeout = Runnable { collapseZoomLevels(animated = true) }
     private var zoomMin = 1f
     private var zoomMax = 1f
     private var zoom = 1f
@@ -1367,6 +1370,21 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private fun rebuildChips() {
         zoomChips.removeAllViews(); chipViews.clear()
+        zoomLevelsExpanded = false
+        ui.removeCallbacks(zoomLevelsTimeout)
+        zoomToggleButton = TextView(this).apply {
+            text = "Zoom"
+            textSize = 12f
+            gravity = Gravity.CENTER
+            minWidth = dp(54)
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = pillBg(false)
+            setTextColor(Color.WHITE)
+            alpha = 1f
+            scaleX = 1f; scaleY = 1f
+            setOnClickListener { expandZoomLevels() }
+        }
+        zoomChips.addView(zoomToggleButton)
         val eqs = lenses.map { l -> try { camera.focalEq(l.id) } catch (t: Throwable) { null } }
         val valid = eqs.filterNotNull()
         if (valid.isEmpty()) { chips = emptyList(); curLensFactor = 1f; zoomChips.visibility = View.GONE; return }
@@ -1390,6 +1408,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         list.sortBy { it.factor }
         chips = list
         zoomChips.visibility = if (list.size > 1) View.VISIBLE else View.GONE
+        zoomToggleButton.visibility = if (list.size > 1) View.VISIBLE else View.GONE
         for (c in list) {
             val tv = TextView(this)
             tv.text = fmtX(c.factor)
@@ -1397,14 +1416,62 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             tv.gravity = Gravity.CENTER
             tv.minWidth = dp(44)
             tv.setPadding(dp(12), dp(6), dp(12), dp(6))
+            tv.visibility = View.GONE
+            tv.alpha = 0f
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             lp.setMargins(dp(3), 0, dp(3), 0)
             tv.layoutParams = lp
-            tv.setOnClickListener { onChip(c) }
+            tv.setOnClickListener {
+                onChip(c)
+                ui.removeCallbacks(zoomLevelsTimeout)
+                ui.postDelayed(zoomLevelsTimeout, 2200)
+            }
             zoomChips.addView(tv)
             chipViews.add(tv)
         }
         updateChips()
+    }
+
+    private fun expandZoomLevels() {
+        if (zoomLevelsExpanded || chips.size <= 1) return
+        zoomLevelsExpanded = true
+        ui.removeCallbacks(zoomLevelsTimeout)
+        zoomToggleButton.animate().cancel()
+        zoomToggleButton.animate().alpha(0f).scaleX(0.82f).scaleY(0.82f)
+            .setDuration(130).withEndAction {
+                if (!zoomLevelsExpanded) return@withEndAction
+                zoomToggleButton.visibility = View.GONE
+                chipViews.forEachIndexed { index, view ->
+                    view.visibility = View.VISIBLE
+                    view.alpha = 0f
+                    view.scaleX = 0.86f; view.scaleY = 0.86f
+                    view.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                        .setStartDelay(index * 22L).setDuration(180).start()
+                }
+            }.start()
+        ui.postDelayed(zoomLevelsTimeout, 2200)
+    }
+
+    private fun collapseZoomLevels(animated: Boolean) {
+        ui.removeCallbacks(zoomLevelsTimeout)
+        if (!zoomLevelsExpanded || !::zoomToggleButton.isInitialized) return
+        zoomLevelsExpanded = false
+        chipViews.forEachIndexed { index, view ->
+            view.animate().cancel()
+            if (animated) {
+                view.animate().alpha(0f).scaleX(0.86f).scaleY(0.86f)
+                    .setStartDelay(index * 12L).setDuration(120)
+                    .withEndAction { view.visibility = View.GONE }.start()
+            } else {
+                view.visibility = View.GONE
+                view.alpha = 0f
+            }
+        }
+        zoomToggleButton.visibility = View.VISIBLE
+        zoomToggleButton.alpha = 0f
+        zoomToggleButton.scaleX = 0.86f; zoomToggleButton.scaleY = 0.86f
+        zoomToggleButton.animate().alpha(1f).scaleX(1f).scaleY(1f)
+            .setStartDelay(if (animated) 70L else 0L).setDuration(180).start()
     }
 
     private fun onChip(c: Chip) {
