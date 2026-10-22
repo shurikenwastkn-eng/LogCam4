@@ -1357,6 +1357,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private fun animateZoomTo(target: Float) {
         val safeTarget = target.coerceIn(zoomMin, uiZoomMax())
+        ui.removeCallbacks(zoomTick)
         zoomTransitionGeneration++
         ui.removeCallbacks(zoomTransition)
         zoomTransitionStart = zoomShown.coerceIn(zoomMin, uiZoomMax()).coerceAtLeast(0.01f)
