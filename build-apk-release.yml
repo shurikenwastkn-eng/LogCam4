@@ -1,0 +1,61 @@
+name: Build APK and publish latest version
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      APP_VERSION: 0.1.${{ github.run_number }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Build versioned APK
+        run: |
+          VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
+          gradle --no-daemon assembleDebug -PappVersionName="$APP_VERSION" -PappVersionCode="$VERSION_CODE"
+
+      - name: Prepare APK
+        shell: bash
+        run: |
+          mkdir -p release-files
+          cp app/build/outputs/apk/debug/app-debug.apk release-files/LogCam.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LogCam-apk
+          path: release-files/LogCam.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish latest GitHub Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.APP_VERSION }}
+          name: LogCam ${{ env.APP_VERSION }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          make_latest: true
+          files: release-files/LogCam.apk
