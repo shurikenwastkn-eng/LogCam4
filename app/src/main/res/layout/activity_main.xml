@@ -34,6 +34,15 @@
         android:background="@drawable/focus_ring"
         android:visibility="gone" />
 
+    <com.logcam.app.HistogramView
+        android:id="@+id/histogramView"
+        android:layout_width="184dp"
+        android:layout_height="78dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="78dp"
+        android:layout_marginEnd="18dp"
+        android:visibility="gone" />
+
     <!-- top left: what you are recording -->
     <LinearLayout
         android:layout_width="wrap_content"
@@ -349,6 +358,10 @@
             </LinearLayout>
 
                 <TextView style="@style/section" android:tag="accent" android:text="MONITORING" />
+            <LinearLayout android:id="@+id/rowHistogram" style="@style/row">
+                <TextView style="@style/rowLabel" android:text="Live histogram" />
+                <TextView android:id="@+id/vHistogram" style="@style/rowValue" android:text="Off" />
+            </LinearLayout>
             <LinearLayout android:id="@+id/rowMonitorTools" style="@style/row">
                 <TextView style="@style/rowLabel" android:text="Exposure / focus assist" />
                 <TextView android:id="@+id/vMonitorTools" style="@style/rowValue" android:text="Off" />
