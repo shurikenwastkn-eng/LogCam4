@@ -32,6 +32,11 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
     private val main = Handler(Looper.getMainLooper())
 
     @Volatile var monitorRec709 = false
+    /** Optional preview histogram. Readback is downsampled and throttled to limit GPU stalls. */
+    @Volatile var histogramEnabled = false
+    @Volatile var cbHistogram: ((FloatArray) -> Unit)? = null
+    private var histogramFrameCounter = 0
+    private val histogramPixels: ByteBuffer = ByteBuffer.allocateDirect(64 * 36 * 4).order(ByteOrder.nativeOrder())
     /** Preview-only overlays: 0 off, 1 zebras, 2 false colour, 3 focus peaking. */
     @Volatile var monitorTools = 0
     @Volatile var recordRec709 = false
@@ -261,7 +266,9 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
                 val w = IntArray(1); val h = IntArray(1)
                 EGL14.eglQuerySurface(dpy, previewEgl, EGL14.EGL_WIDTH, w, 0)
                 EGL14.eglQuerySurface(dpy, previewEgl, EGL14.EGL_HEIGHT, h, 0)
-                draw(w[0], h[0], true, if (monitorRec709) 1f else 0f, computeK(displayRotationDeg, manualQuarterTurns, true), monitorTools)
+                val rotation = computeK(displayRotationDeg, manualQuarterTurns, true)
+                if (histogramEnabled && ++histogramFrameCounter % 6 == 0) updateHistogram(rotation)
+                draw(w[0], h[0], true, if (monitorRec709) 1f else 0f, rotation, monitorTools)
                 EGL14.eglSwapBuffers(dpy, previewEgl)
             }
 
@@ -278,6 +285,29 @@ class GlPipeline(private val previewSurface: Surface, private val want10bit: Boo
             }
         } catch (t: Throwable) {
             Log.e(TAG, "drawFrame", t)
+        }
+    }
+
+    /** Render a tiny preview sample and build a luminance histogram without touching recorded frames. */
+    private fun updateHistogram(rotation: Int) {
+        try {
+            draw(64, 36, false, if (monitorRec709) 1f else 0f, rotation, 0)
+            histogramPixels.position(0)
+            GLES30.glReadPixels(0, 0, 64, 36, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, histogramPixels)
+            val bins = FloatArray(64)
+            for (i in 0 until 64 * 36) {
+                val r = histogramPixels.get(i * 4).toInt() and 0xff
+                val g = histogramPixels.get(i * 4 + 1).toInt() and 0xff
+                val b = histogramPixels.get(i * 4 + 2).toInt() and 0xff
+                val luma = (0.2126f * r + 0.7152f * g + 0.0722f * b).toInt().coerceIn(0, 255)
+                bins[(luma * 63) / 255] += 1f
+            }
+            val max = bins.maxOrNull()?.coerceAtLeast(1f) ?: 1f
+            for (i in bins.indices) bins[i] /= max
+            val snapshot = bins
+            main.post { if (histogramEnabled) cbHistogram?.invoke(snapshot) }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Histogram sample failed", t)
         }
     }
 
