@@ -87,6 +87,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     // views
     private lateinit var preview: SurfaceView
     private lateinit var focusRing: View
+    private lateinit var histogramView: HistogramView
+    private lateinit var vHistogram: TextView
     private lateinit var tvInfo: TextView
     private lateinit var tvInfo2: TextView
     private lateinit var tvTimer: TextView
@@ -221,6 +223,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private var audioPref = true
     private var assistPref = false
     private var outputRec709 = false
+    private var histogramEnabled = false
     private var autoExp = true
     private var autoFocus = true
     private var isoProgress = 20
@@ -355,6 +358,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         g.previewPaused = ::libraryPanel.isInitialized && libraryPanel.visibility == View.VISIBLE
         g.monitorRec709 = assistPref
         g.monitorTools = monitorToolIdx
+        g.histogramEnabled = histogramEnabled
+        g.cbHistogram = { bins -> if (histogramEnabled) histogramView.setBins(bins) }
         g.recordRec709 = outputRec709
         g.useCineGamut = gamutCine
         g.evStops = (evProgress - 12) / 4f
@@ -446,6 +451,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         preview = findViewById(R.id.preview)
         preview.holder.addCallback(this)
         focusRing = findViewById(R.id.focusRing)
+        histogramView = findViewById(R.id.histogramView)
+        vHistogram = findViewById(R.id.vHistogram)
+        histogramEnabled = prefs.getBoolean("histogramEnabled", false)
+        histogramView.visibility = if (histogramEnabled) View.VISIBLE else View.GONE
         tvInfo = findViewById(R.id.tvInfo); tvInfo2 = findViewById(R.id.tvInfo2)
         tvTimer = findViewById(R.id.tvTimer)
         btnRecord = findViewById(R.id.btnRecord); btnSettings = findViewById(R.id.btnSettings)
@@ -600,6 +609,16 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         }
         findViewById<View>(R.id.rowProfile).setOnClickListener {
             showGlassChoice("Camera profile", profileNames, profileIdx) { index -> applyCameraProfile(index) }
+        }
+        findViewById<View>(R.id.rowHistogram).setOnClickListener {
+            val choices = listOf("Off", "On")
+            showGlassChoice("Live histogram", choices, if (histogramEnabled) 1 else 0) { index ->
+                histogramEnabled = index == 1
+                prefs.edit().putBoolean("histogramEnabled", histogramEnabled).apply()
+                histogramView.visibility = if (histogramEnabled) View.VISIBLE else View.GONE
+                gl?.histogramEnabled = histogramEnabled
+                updateRows()
+            }
         }
         findViewById<View>(R.id.rowMonitorTools).setOnClickListener {
             showGlassChoice("Exposure / focus assist", monitorToolNames, monitorToolIdx) { index ->
@@ -974,6 +993,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         vAssist.text = if (assistPref) "On" else "Off"
         vProfile.text = profileNames.getOrElse(profileIdx) { "Custom" }
         vMonitorTools.text = monitorToolNames.getOrElse(monitorToolIdx) { "Off" }
+        vHistogram.text = if (histogramEnabled) "On" else "Off"
         if (vOutputRec709.isChecked != outputRec709) vOutputRec709.isChecked = outputRec709
         vOutputRec709.isEnabled = !recording
         vRot.text = "${manualFor(displayRotationDeg()) * 90}°"
